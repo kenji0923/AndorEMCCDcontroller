@@ -1,0 +1,2 @@
+# Give the "andor" group access to the Andor PCI driver device nodes.
+KERNEL=="andordrvlx*", GROUP="andor", MODE="0660"

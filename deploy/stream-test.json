@@ -1,0 +1,9 @@
+{
+  "camera": "sim",
+  "control_port": 47400,
+  "data_port": 47401,
+  "ipc_dir": "/tmp/aec-stream-test",
+  "history_frames": 4,
+  "history_megabytes": 16,
+  "warmup_on_exit": false
+}

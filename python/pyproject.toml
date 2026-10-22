@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "andor-emccd"
+version = "0.1.0"
+description = "Client for the Andor iXon EMCCD backend service (ZeroMQ)"
+requires-python = ">=3.8"
+dependencies = ["numpy", "pyzmq"]
+
+[project.optional-dependencies]
+recording = ["tifffile"]
+
+[tool.setuptools]
+packages = ["andor_emccd"]

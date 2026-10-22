@@ -1,0 +1,28 @@
+{
+  // Andor iXon EMCCD backend configuration (comments are allowed).
+  "camera": "andor",                       // "andor" or "sim"
+  "andor_config_dir": "/usr/local/etc/andor",
+  "ipc_dir": "/run/andor-emccd",
+  "bind_address": "*",                     // or the lab LAN address
+  "control_port": 47100,
+  "data_port": 47101,
+  "history_frames": 2000,                  // server ring length (fetch and per-client streams)
+  "history_megabytes": 2048,
+  "status_interval_s": 0.5,
+  "publish_hwm": 16,                       // frames queued per slow viewer
+  "control_lease_s": 10,                   // control freed after this silence
+  "settings_file": "/var/lib/andor-emccd/settings.json",
+  "warmup_on_exit": true,
+  "warmup_target_c": -20,
+  "warmup_timeout_s": 900,
+  // Applied at start, before the persisted settings_file.
+  "initial_settings": {
+    "cooler_on": true,
+    "target_temperature_c": -70,
+    "fan_mode": "full",
+    "em_gain": 0,
+    "acquisition_mode": "continuous",
+    "trigger_mode": "internal",
+    "exposure_time_s": 0.01
+  }
+}

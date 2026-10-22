@@ -1,0 +1,18 @@
+# Build / install output
+build/
+install/
+
+# Editor / OS cruft
+*.swp
+*~
+.DS_Store
+build-*/
+AppDir/
+*.AppImage
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+python/bench/results/

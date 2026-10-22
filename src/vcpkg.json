@@ -1,0 +1,14 @@
+{
+  "name": "andor-emccd-controller",
+  "version-string": "0.1.0",
+  "description": "Frontend dependencies for Windows builds (Qt comes from the Qt installer).",
+  "dependencies": [
+    "zeromq",
+    "cppzmq",
+    "tiff",
+    "libpng",
+    "cfitsio",
+    "nlohmann-json",
+    "gtest"
+  ]
+}

@@ -1,0 +1,139 @@
+# Builds and tests the frontend (and the simulator-only backend on Linux), and
+# packages the GUI: a self-contained folder for Windows and an AppImage for
+# Linux. Tags v* also attach both to a GitHub Release.
+name: build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-2022
+    env:
+      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}\vcpkg-cache
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.8.3"
+          arch: win64_msvc2022_64
+          cache: true
+
+      - name: Cache vcpkg packages
+        uses: actions/cache@v4
+        with:
+          path: vcpkg-cache
+          key: vcpkg-x64-windows-${{ hashFiles('src/vcpkg.json') }}
+
+      - uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Configure
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force $env:VCPKG_DEFAULT_BINARY_CACHE | Out-Null
+          # Manifest mode: src/vcpkg.json lists the dependencies.
+          cmake -S src -B build -G Ninja -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT\scripts\buildsystems\vcpkg.cmake" `
+            -DVCPKG_TARGET_TRIPLET=x64-windows
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $deploy = "andor_emccd_gui-windows-x64"
+          New-Item -ItemType Directory -Force $deploy | Out-Null
+          Copy-Item build\exec\gui\andor_emccd_gui.exe $deploy
+          Copy-Item build\vcpkg_installed\x64-windows\bin\*.dll $deploy
+          windeployqt --release --no-translations "$deploy\andor_emccd_gui.exe"
+          Copy-Item README.md $deploy
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: andor_emccd_gui-windows-x64
+          path: andor_emccd_gui-windows-x64
+
+  linux:
+    runs-on: ubuntu-latest
+    # AlmaLinux 9 (glibc 2.34): the AppImage runs on EL9, EL10 and newer.
+    container: almalinux:9
+    steps:
+      - name: Install packages
+        run: |
+          dnf -y install dnf-plugins-core epel-release
+          dnf config-manager --set-enabled crb
+          dnf -y install gcc-c++ cmake ninja-build git file findutils \
+            cppzmq-devel zeromq-devel spdlog-devel \
+            qt6-qtbase-devel qt6-qtbase-gui libtiff-devel libpng-devel cfitsio-devel \
+            xcb-util-cursor xcb-util-wm xcb-util-image xcb-util-keysyms xcb-util-renderutil
+
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        # No Andor SDK on CI: the backend is built with the simulated camera.
+        run: cmake -S src -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Package AppImage
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+          QMAKE: /usr/lib64/qt6/bin/qmake
+          OUTPUT: andor_emccd_gui-x86_64.AppImage
+          # xcb is always bundled (also used on Wayland via XWayland); add offscreen.
+          EXTRA_PLATFORM_PLUGINS: libqoffscreen.so
+        run: |
+          base=https://github.com/linuxdeploy
+          curl -fsSLO $base/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          curl -fsSLO $base/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
+          chmod +x linuxdeploy*.AppImage
+          res=src/exec/gui/resources
+          ./linuxdeploy-x86_64.AppImage --appdir AppDir \
+            --executable build/exec/gui/andor_emccd_gui \
+            --desktop-file $res/andor_emccd_gui.desktop \
+            --icon-file $res/andor_emccd_gui.png \
+            --plugin qt --output appimage
+          # Smoke test: start headless and write the icon set.
+          mkdir -p icon-test
+          QT_QPA_PLATFORM=offscreen ./andor_emccd_gui-x86_64.AppImage --export-icon icon-test
+          ls icon-test
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: andor_emccd_gui-linux-x86_64
+          path: andor_emccd_gui-x86_64.AppImage
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [windows, linux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+      - name: Zip the Windows folder
+        run: zip -r andor_emccd_gui-windows-x64.zip andor_emccd_gui-windows-x64
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            andor_emccd_gui-windows-x64.zip
+            andor_emccd_gui-linux-x86_64/andor_emccd_gui-x86_64.AppImage

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=iXon EMCCD
+GenericName=EMCCD camera frontend
+Comment=Live view, settings and ROI analysis for the Andor iXon backend
+Exec=andor_emccd_gui
+Icon=andor_emccd_gui
+Terminal=false
+Categories=Science;Physics;
+StartupWMClass=andor_emccd_gui

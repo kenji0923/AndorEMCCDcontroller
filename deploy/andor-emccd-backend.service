@@ -1,0 +1,27 @@
+[Unit]
+Description=Andor iXon EMCCD camera backend
+Documentation=file:///usr/local/share/doc/andor-emccd/index.html
+After=network-online.target andordrvlx.service
+Wants=network-online.target andordrvlx.service
+
+[Service]
+Type=simple
+User=andor
+Group=andor
+ExecStart=/usr/local/bin/andor_emccd_backend --config /etc/andor-emccd/backend.json
+Restart=on-failure
+RestartSec=5
+# The sensor is warmed above -20 C before ShutDown (up to warmup_timeout_s).
+TimeoutStopSec=960
+# IPC sockets for clients on this host: /run/andor-emccd/{control,data}.
+RuntimeDirectory=andor-emccd
+RuntimeDirectoryMode=0775
+UMask=0002
+# Persisted settings: /var/lib/andor-emccd/settings.json.
+StateDirectory=andor-emccd
+# The SDK page-locks its DMA buffers.
+LimitMEMLOCK=infinity
+Nice=-5
+
+[Install]
+WantedBy=multi-user.target

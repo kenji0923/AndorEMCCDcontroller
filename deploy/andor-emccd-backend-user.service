@@ -1,0 +1,24 @@
+# User service variant: runs as the login user (systemctl --user).
+# Install with deploy/install_backend_user.sh after the one-time root step
+# deploy/prepare_user_service_root.sh (group, udev, /run/andor-emccd, linger).
+[Unit]
+Description=Andor iXon EMCCD camera backend (user service)
+Documentation=file://%h/.local/share/doc/andor-emccd/index.html
+
+[Service]
+Type=simple
+# User units cannot order after the system andordrvlx.service; the backend
+# keeps running without the camera and retries every 30 s.
+ExecStart=%h/.local/bin/andor_emccd_backend --config %h/.config/andor-emccd/backend.json
+Restart=on-failure
+RestartSec=5
+# The sensor is warmed above -20 C before ShutDown (up to warmup_timeout_s).
+# At system shutdown the user manager itself is stopped after about 2 min.
+TimeoutStopSec=960
+# Sockets in /run/andor-emccd (group andor, setgid) stay group-accessible.
+UMask=0002
+# Persisted settings: ~/.local/state/andor-emccd/settings.json.
+StateDirectory=andor-emccd
+
+[Install]
+WantedBy=default.target
