@@ -10,6 +10,7 @@
 
 #include <QCheckBox>
 #include <QComboBox>
+#include <QCoreApplication>
 #include <QDoubleSpinBox>
 #include <QFormLayout>
 #include <QGroupBox>
@@ -39,7 +40,21 @@ class WheelControlledSpinBox final : public SpinBox {
     if (wheel_changes_->isChecked()) {
       SpinBox::wheelEvent(event);
     } else {
-      // Leave the wheel available for scrolling the surrounding settings panel.
+      // Scroll the panel instead, including when the spin box has focus.
+      for (QWidget* parent = this->parentWidget(); parent;
+           parent = parent->parentWidget()) {
+        if (auto* scroll = qobject_cast<QScrollArea*>(parent)) {
+          QWheelEvent forwarded(
+              QPointF(scroll->viewport()->mapFromGlobal(
+                  event->globalPosition().toPoint())),
+              event->globalPosition(), event->pixelDelta(), event->angleDelta(),
+              event->buttons(), event->modifiers(), event->phase(),
+              event->inverted(), event->source(), event->pointingDevice());
+          QCoreApplication::sendEvent(scroll->viewport(), &forwarded);
+          event->setAccepted(forwarded.isAccepted());
+          return;
+        }
+      }
       event->ignore();
     }
   }
