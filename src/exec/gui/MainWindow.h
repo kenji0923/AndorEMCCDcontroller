@@ -127,6 +127,8 @@ class MainWindow : public QMainWindow {
   QDoubleSpinBox* pct_lo_ = nullptr;
   QDoubleSpinBox* pct_hi_ = nullptr;
   QCheckBox* log_scale_ = nullptr;
+  QCheckBox* threshold_mode_ = nullptr;
+  QDoubleSpinBox* threshold_ = nullptr;
   QCheckBox* flip_h_ = nullptr;
   QCheckBox* flip_v_ = nullptr;
   QComboBox* rotation_ = nullptr;  ///< Clockwise, index * 90 degrees.

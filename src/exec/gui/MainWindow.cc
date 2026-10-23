@@ -306,6 +306,18 @@ void MainWindow::BuildDisplayDock() {
   pct_lo_->setValue(0.5);
   pct_hi_->setValue(99.5);
   log_scale_ = new QCheckBox(tr("Logarithmic"), w);
+  threshold_mode_ = new QCheckBox(tr("Threshold (photon-counting display)"), w);
+  threshold_mode_->setObjectName("display_threshold_enabled");
+  threshold_mode_->setToolTip(
+      tr("Pixels at or above the threshold are white; lower pixels are black. "
+         "Applied after display averaging. Raw recording and analysis keep "
+         "the original values."));
+  threshold_ = new QDoubleSpinBox(w);
+  threshold_->setObjectName("display_threshold");
+  threshold_->setRange(-1e12, 1e12);
+  threshold_->setDecimals(3);
+  threshold_->setKeyboardTracking(false);
+  threshold_->setValue(1000.0);
   flip_h_ = new QCheckBox(tr("Flip horizontally"), w);
   flip_v_ = new QCheckBox(tr("Flip vertically"), w);
   rotation_ = new QComboBox(w);
@@ -328,6 +340,8 @@ void MainWindow::BuildDisplayDock() {
   average_used_ = new QLabel(w);
   form->addRow(tr("Average (frames)"), average_frames_);
   form->addRow(tr("Images averaged"), average_used_);
+  form->addRow(threshold_mode_);
+  form->addRow(tr("Threshold (raw units)"), threshold_);
   form->addRow(tr("Colormap"), cmap_row);
   form->addRow(tr("Scale"), scale_mode_);
   form->addRow(tr("Minimum"), scale_lo_);
@@ -346,11 +360,19 @@ void MainWindow::BuildDisplayDock() {
 
   auto redraw = [this] {
     last_rendered_seq_ = UINT64_MAX;
+    const bool binary = threshold_mode_->isChecked();
     const bool fixed = scale_mode_->currentIndex() == kScaleFixed;
-    scale_lo_->setEnabled(fixed);
-    scale_hi_->setEnabled(fixed);
-    pct_lo_->setEnabled(scale_mode_->currentIndex() == kScalePercentile);
-    pct_hi_->setEnabled(scale_mode_->currentIndex() == kScalePercentile);
+    threshold_->setEnabled(binary);
+    colormap_->setEnabled(!binary);
+    reverse_cmap_->setEnabled(!binary);
+    scale_mode_->setEnabled(!binary);
+    log_scale_->setEnabled(!binary);
+    scale_lo_->setEnabled(!binary && fixed);
+    scale_hi_->setEnabled(!binary && fixed);
+    pct_lo_->setEnabled(!binary && scale_mode_->currentIndex() == kScalePercentile);
+    pct_hi_->setEnabled(!binary && scale_mode_->currentIndex() == kScalePercentile);
+    colorbar_->setVisible(!binary);
+    view_->SetSmoothDownsampling(!binary);
     RenderLatest();
   };
   connect(average_frames_, &QSpinBox::valueChanged, this, redraw);
@@ -362,6 +384,8 @@ void MainWindow::BuildDisplayDock() {
     connect(s, &QDoubleSpinBox::valueChanged, this, redraw);
   }
   connect(log_scale_, &QCheckBox::toggled, this, redraw);
+  connect(threshold_mode_, &QCheckBox::toggled, this, redraw);
+  connect(threshold_, &QDoubleSpinBox::valueChanged, this, redraw);
   auto flip = [this] {
     view_->SetFlip(flip_h_->isChecked(), flip_v_->isChecked());
   };
@@ -852,14 +876,15 @@ void MainWindow::RenderLatest() {
                                         .arg(average_frames_->value()));
 
   const std::uint8_t* pixels = displayed_frame_.data->data();
+  const bool binary = threshold_mode_->isChecked();
   double lo = scale_lo_->value();
   double hi = scale_hi_->value();
-  if (scale_mode_->currentIndex() == kScaleMinMax) {
+  if (!binary && scale_mode_->currentIndex() == kScaleMinMax) {
     FrameMinMax(h, pixels, &lo, &hi);
-  } else if (scale_mode_->currentIndex() == kScalePercentile) {
+  } else if (!binary && scale_mode_->currentIndex() == kScalePercentile) {
     FramePercentiles(h, pixels, pct_lo_->value(), pct_hi_->value(), &lo, &hi);
   }
-  if (scale_mode_->currentIndex() != kScaleFixed) {
+  if (!binary && scale_mode_->currentIndex() != kScaleFixed) {
     // Mirror the automatic range so that switching to fixed keeps it.
     const QSignalBlocker block_lo(scale_lo_);
     const QSignalBlocker block_hi(scale_hi_);
@@ -867,12 +892,17 @@ void MainWindow::RenderLatest() {
     scale_hi_->setValue(hi);
   }
   std::vector<std::uint8_t> idx(static_cast<std::size_t>(h.width) * h.height);
-  MapToIndices(h, pixels, lo, hi, log_scale_->isChecked(), idx.data());
+  if (binary) {
+    MapThresholdToIndices(h, pixels, threshold_->value(), idx.data());
+  } else {
+    MapToIndices(h, pixels, lo, hi, log_scale_->isChecked(), idx.data());
+  }
+  const auto colors = binary ? GetColormap("gray") : cmap_;
   QImage image(h.width, h.height, QImage::Format_RGB32);
   for (int y = 0; y < h.height; ++y) {
     auto* line = reinterpret_cast<QRgb*>(image.scanLine(y));
     const std::uint8_t* src = idx.data() + static_cast<std::size_t>(y) * h.width;
-    for (int x = 0; x < h.width; ++x) line[x] = 0xff000000u | cmap_[src[x]];
+    for (int x = 0; x < h.width; ++x) line[x] = 0xff000000u | colors[src[x]];
   }
   view_->SetImage(image);
   view_->SetRois(analysis_panel_->Rois(), analysis_panel_->SelectedRoi());
@@ -909,8 +939,11 @@ DisplayOrientation MainWindow::Orientation() const {
 }
 
 Json MainWindow::SaveMetadata() const {
+  Json display = OrientationToJson(Orientation());
+  display["threshold_enabled"] = threshold_mode_->isChecked();
+  display["threshold"] = threshold_->value();
   return Json{{"settings", settings_},
-              {"display", OrientationToJson(Orientation())},
+              {"display", display},
               {"camera",
                {{"model", info_.value("model", "")},
                 {"serial", info_.value("serial", "")},
@@ -973,7 +1006,7 @@ void MainWindow::SaveView() {
   const QImage& image = view_->Image();
   if (image.isNull()) return;
   const QString path = QFileDialog::getSaveFileName(
-      this, tr("Save false-color view"), QStringLiteral("view.png"),
+      this, tr("Save displayed view"), QStringLiteral("view.png"),
       tr("PNG (*.png)"));
   if (path.isEmpty()) return;
   // As shown: flips, then rotation (the translation part is ignored here).
@@ -1114,6 +1147,8 @@ void MainWindow::LoadPreferences() {
   pct_lo_->setValue(s.value("display/pct_lo", 0.5).toDouble());
   pct_hi_->setValue(s.value("display/pct_hi", 99.5).toDouble());
   log_scale_->setChecked(s.value("display/log", false).toBool());
+  threshold_->setValue(s.value("display/threshold", 1000.0).toDouble());
+  threshold_mode_->setChecked(s.value("display/threshold_enabled", false).toBool());
   flip_h_->setChecked(s.value("display/flip_h", false).toBool());
   flip_v_->setChecked(s.value("display/flip_v", false).toBool());
   rotation_->setCurrentIndex(std::clamp(s.value("display/rotation", 0).toInt(), 0, 3));
@@ -1158,6 +1193,8 @@ void MainWindow::SavePreferences() const {
   s.setValue("display/pct_lo", pct_lo_->value());
   s.setValue("display/pct_hi", pct_hi_->value());
   s.setValue("display/log", log_scale_->isChecked());
+  s.setValue("display/threshold_enabled", threshold_mode_->isChecked());
+  s.setValue("display/threshold", threshold_->value());
   s.setValue("display/flip_h", flip_h_->isChecked());
   s.setValue("display/flip_v", flip_v_->isChecked());
   s.setValue("display/rotation", rotation_->currentIndex());

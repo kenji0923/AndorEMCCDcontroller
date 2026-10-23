@@ -59,6 +59,11 @@ void ImageView::SetRotation(int degrees_cw) {
   update();
 }
 
+void ImageView::SetSmoothDownsampling(bool enabled) {
+  smooth_downsampling_ = enabled;
+  update();
+}
+
 QTransform ImageView::Orientation() const {
   const double w = image_.width();
   const double h = image_.height();
@@ -149,7 +154,8 @@ void ImageView::paintEvent(QPaintEvent*) {
   const QTransform t = ImageToWidget();
   p.save();
   p.setTransform(t);
-  p.setRenderHint(QPainter::SmoothPixmapTransform, scale_ < 1.0);
+  p.setRenderHint(QPainter::SmoothPixmapTransform,
+                 smooth_downsampling_ && scale_ < 1.0);
   p.drawImage(QPointF(0, 0), image_);
   p.restore();
 

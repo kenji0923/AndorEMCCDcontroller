@@ -224,4 +224,12 @@ void MapToIndices(const FrameHeader& header, const std::uint8_t* data,
   }
 }
 
+void MapThresholdToIndices(const FrameHeader& header, const std::uint8_t* data,
+                          double threshold, std::uint8_t* out) {
+  std::size_t i = 0;
+  Dispatch(header, data, 0, 0, header.width, header.height, [&](double value) {
+    out[i++] = std::isfinite(value) && value >= threshold ? 255 : 0;
+  });
+}
+
 }  // namespace AndorEMCCDcontroller

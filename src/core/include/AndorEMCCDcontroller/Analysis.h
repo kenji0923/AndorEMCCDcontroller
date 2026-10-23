@@ -76,6 +76,11 @@ void FramePercentiles(const FrameHeader& header, const std::uint8_t* data,
 void MapToIndices(const FrameHeader& header, const std::uint8_t* data,
                   double lo, double hi, bool log, std::uint8_t* out);
 
+/** Display-only binary mapping: finite pixels >= threshold become 255,
+ * otherwise 0. The source pixels and ROI statistics are not modified. */
+void MapThresholdToIndices(const FrameHeader& header, const std::uint8_t* data,
+                          double threshold, std::uint8_t* out);
+
 }  // namespace AndorEMCCDcontroller
 
 #endif

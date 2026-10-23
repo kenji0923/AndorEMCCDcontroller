@@ -5,6 +5,7 @@
 
 #include <cmath>
 #include <cstring>
+#include <limits>
 
 #include <gtest/gtest.h>
 
@@ -82,6 +83,43 @@ TEST(Analysis, PercentilesAndMapping) {
   aec::MapToIndices(f.header, f.data->data(), 0.0, 23.0, false, idx.data());
   EXPECT_EQ(idx[0], 0);
   EXPECT_EQ(idx[11], 255);
+}
+
+TEST(Analysis, ThresholdDisplayIncludesBoundaryAndPreservesRawPixels) {
+  const aec::Frame frame = MakeFrame();
+  const auto original = *frame.data;
+  const auto before = aec::ComputeRoiStats(
+      frame.header, frame.data->data(), aec::Roi{"all", 0, 0, 4, 3});
+  std::vector<std::uint8_t> indices(12);
+  aec::MapThresholdToIndices(frame.header, frame.data->data(), 11.0,
+                            indices.data());
+  EXPECT_EQ(indices, (std::vector<std::uint8_t>{0, 0, 0, 0, 0, 255, 255, 255,
+                                               255, 255, 255, 255}));
+  EXPECT_EQ(*frame.data, original);
+  const auto after = aec::ComputeRoiStats(
+      frame.header, frame.data->data(), aec::Roi{"all", 0, 0, 4, 3});
+  EXPECT_DOUBLE_EQ(after.sum, before.sum);
+  EXPECT_DOUBLE_EQ(after.mean, before.mean);
+}
+
+TEST(Analysis, ThresholdDisplaySupportsSignedAndFloatingPixels) {
+  aec::FrameHeader header;
+  header.width = 4;
+  header.height = 1;
+  std::uint8_t indices[4];
+  header.pixel_type = aec::PixelType::kInt32;
+  const std::int32_t signed_pixels[] = {-10, -1, 0, 100000};
+  aec::MapThresholdToIndices(header,
+      reinterpret_cast<const std::uint8_t*>(signed_pixels), -1.0, indices);
+  EXPECT_EQ((std::vector<std::uint8_t>(indices, indices + 4)),
+            (std::vector<std::uint8_t>{0, 255, 255, 255}));
+  header.pixel_type = aec::PixelType::kFloat32;
+  const float float_pixels[] = {1.25f, 1.5f, 1.75f,
+                                std::numeric_limits<float>::quiet_NaN()};
+  aec::MapThresholdToIndices(header,
+      reinterpret_cast<const std::uint8_t*>(float_pixels), 1.5, indices);
+  EXPECT_EQ((std::vector<std::uint8_t>(indices, indices + 4)),
+            (std::vector<std::uint8_t>{0, 255, 255, 0}));
 }
 
 TEST(Expression, EvaluatesInOrderWithPreviousResults) {

@@ -38,6 +38,7 @@ class ImageView : public QWidget {
   void SetFlip(bool horizontal, bool vertical);
   /** Clockwise rotation in degrees (0, 90, 180, 270), applied after flips. */
   void SetRotation(int degrees_cw);
+  void SetSmoothDownsampling(bool enabled);
   /** Frame pixels -> displayed image (flips then rotation), origin at 0. */
   QTransform Orientation() const;
   void SetDrawRoiMode(bool on);
@@ -77,6 +78,7 @@ class ImageView : public QWidget {
   bool draw_roi_mode_ = false;
   bool fit_pending_ = true;
   bool auto_fit_ = true;
+  bool smooth_downsampling_ = true;
 
   double scale_ = 1.0;
   QPointF offset_;  ///< Widget position of the (oriented) image origin.
