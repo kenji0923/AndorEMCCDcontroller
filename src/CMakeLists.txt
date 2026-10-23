@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
 
-project(AndorEMCCDcontroller VERSION 0.1.0 LANGUAGES C CXX)
+project(AndorEMCCDcontroller VERSION 0.2.0 LANGUAGES C CXX)
+
+add_compile_definitions(AEC_VERSION="${PROJECT_VERSION}")
 
 include(GNUInstallDirs)
 

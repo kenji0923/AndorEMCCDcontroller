@@ -153,6 +153,7 @@ TEST(Backend, ArmWaitFetchAndLiveStream) {
   aec::ControlClient client(&context, "tcp://127.0.0.1:47195");
   client.SetIdentity("tester", "");
   EXPECT_TRUE(client.Request("ping")["simulated"].get<bool>());
+  EXPECT_EQ(client.Request("ping")["version"], AEC_VERSION);
   // Mutating commands need the control right.
   try {
     client.Request("stop");

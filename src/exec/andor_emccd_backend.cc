@@ -110,7 +110,7 @@ bool IpcDirUsable(const std::string& dir) {
 }  // namespace
 
 int main(int argc, char** argv) {
-  argparse::ArgumentParser program("andor_emccd_backend", "0.1.0");
+  argparse::ArgumentParser program("andor_emccd_backend", AEC_VERSION);
   program.add_description(
       "Andor iXon EMCCD backend service (control: ROUTER, data: PUB).");
   program.add_argument("--config").help("JSON configuration file");

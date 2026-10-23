@@ -308,6 +308,13 @@ void MainWindow::BuildDisplayDock() {
   log_scale_ = new QCheckBox(tr("Logarithmic"), w);
   flip_h_ = new QCheckBox(tr("Flip horizontally"), w);
   flip_v_ = new QCheckBox(tr("Flip vertically"), w);
+  rotation_ = new QComboBox(w);
+  rotation_->addItems({tr("0°"), tr("90° clockwise"), tr("180°"),
+                       tr("270° clockwise")});
+  rotation_->setToolTip(tr("Display only, applied after the flips. Saved raw "
+                           "data are not rotated; the orientation is recorded "
+                           "in the file (TIFF Orientation tag, FITS keywords, "
+                           "JSON metadata)."));
 
   auto* cmap_row = new QHBoxLayout();
   cmap_row->addWidget(colormap_, 1);
@@ -330,6 +337,7 @@ void MainWindow::BuildDisplayDock() {
   form->addRow(log_scale_);
   form->addRow(flip_h_);
   form->addRow(flip_v_);
+  form->addRow(tr("Rotation"), rotation_);
 
   auto* dock = new QDockWidget(tr("Display"), this);
   dock->setObjectName("display_dock");
@@ -359,6 +367,8 @@ void MainWindow::BuildDisplayDock() {
   };
   connect(flip_h_, &QCheckBox::toggled, this, flip);
   connect(flip_v_, &QCheckBox::toggled, this, flip);
+  connect(rotation_, &QComboBox::currentIndexChanged, this,
+          [this](int index) { view_->SetRotation(90 * index); });
   redraw();
 }
 
@@ -890,8 +900,17 @@ void MainWindow::ReconfigureAnalysis() {
   view_->SetRois(rois, analysis_panel_->SelectedRoi());
 }
 
+DisplayOrientation MainWindow::Orientation() const {
+  DisplayOrientation o;
+  o.rotation_cw_deg = 90 * rotation_->currentIndex();
+  o.flip_horizontal = flip_h_->isChecked();
+  o.flip_vertical = flip_v_->isChecked();
+  return o;
+}
+
 Json MainWindow::SaveMetadata() const {
   return Json{{"settings", settings_},
+              {"display", OrientationToJson(Orientation())},
               {"camera",
                {{"model", info_.value("model", "")},
                 {"serial", info_.value("serial", "")},
@@ -957,15 +976,9 @@ void MainWindow::SaveView() {
       this, tr("Save false-color view"), QStringLiteral("view.png"),
       tr("PNG (*.png)"));
   if (path.isEmpty()) return;
-#if QT_VERSION >= QT_VERSION_CHECK(6, 9, 0)
-  Qt::Orientations flips;
-  if (flip_h_->isChecked()) flips |= Qt::Horizontal;
-  if (flip_v_->isChecked()) flips |= Qt::Vertical;
-  QImage flipped = image.flipped(flips).convertToFormat(QImage::Format_RGB32);
-#else
-  QImage flipped = image.mirrored(flip_h_->isChecked(), flip_v_->isChecked())
-                       .convertToFormat(QImage::Format_RGB32);
-#endif
+  // As shown: flips, then rotation (the translation part is ignored here).
+  const QImage flipped =
+      image.transformed(view_->Orientation()).convertToFormat(QImage::Format_RGB32);
   std::vector<std::uint32_t> rgb(static_cast<std::size_t>(flipped.width()) *
                                  flipped.height());
   for (int y = 0; y < flipped.height(); ++y) {
@@ -1103,6 +1116,7 @@ void MainWindow::LoadPreferences() {
   log_scale_->setChecked(s.value("display/log", false).toBool());
   flip_h_->setChecked(s.value("display/flip_h", false).toBool());
   flip_v_->setChecked(s.value("display/flip_v", false).toBool());
+  rotation_->setCurrentIndex(std::clamp(s.value("display/rotation", 0).toInt(), 0, 3));
   arm_frames_->setValue(s.value("acquisition/series_frames", 10).toInt());
   const QString analysis = s.value("analysis/json").toString();
   if (!analysis.isEmpty()) {
@@ -1118,6 +1132,7 @@ void MainWindow::LoadPreferences() {
     trend.push_back(n.toStdString());
   }
   trend_panel_->Select(trend);
+  trend_panel_->RestoreState(s);
   restoreGeometry(s.value("window/geometry").toByteArray());
   restoreState(s.value("window/state").toByteArray());
 }
@@ -1145,6 +1160,7 @@ void MainWindow::SavePreferences() const {
   s.setValue("display/log", log_scale_->isChecked());
   s.setValue("display/flip_h", flip_h_->isChecked());
   s.setValue("display/flip_v", flip_v_->isChecked());
+  s.setValue("display/rotation", rotation_->currentIndex());
   s.setValue("acquisition/series_frames", arm_frames_->value());
   s.setValue("analysis/json",
              QString::fromStdString(analysis_panel_->ToJson().dump()));
@@ -1153,6 +1169,7 @@ void MainWindow::SavePreferences() const {
     trend << QString::fromStdString(n);
   }
   s.setValue("trend/selected", trend);
+  trend_panel_->SaveState(&s);
   s.setValue("window/geometry", saveGeometry());
   s.setValue("window/state", saveState());
 }

@@ -36,6 +36,10 @@ class ImageView : public QWidget {
 
   void SetRois(const std::vector<Roi>& rois, int selected);
   void SetFlip(bool horizontal, bool vertical);
+  /** Clockwise rotation in degrees (0, 90, 180, 270), applied after flips. */
+  void SetRotation(int degrees_cw);
+  /** Frame pixels -> displayed image (flips then rotation), origin at 0. */
+  QTransform Orientation() const;
   void SetDrawRoiMode(bool on);
 
  public slots:
@@ -69,12 +73,13 @@ class ImageView : public QWidget {
   int selected_ = -1;
   bool flip_h_ = false;
   bool flip_v_ = false;
+  int rotation_ = 0;
   bool draw_roi_mode_ = false;
   bool fit_pending_ = true;
   bool auto_fit_ = true;
 
   double scale_ = 1.0;
-  QPointF offset_;  ///< Widget position of the (flipped) image origin.
+  QPointF offset_;  ///< Widget position of the (oriented) image origin.
 
   enum class Drag { kNone, kPan, kDraw, kMoveRoi };
   Drag drag_ = Drag::kNone;

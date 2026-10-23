@@ -32,7 +32,7 @@ int main(int argc, char** argv) {
   QApplication app(argc, argv);
   QApplication::setOrganizationName("AndorEMCCDcontroller");
   QApplication::setApplicationName("AndorEMCCDcontroller");
-  QApplication::setApplicationVersion("0.1.0");
+  QApplication::setApplicationVersion(AEC_VERSION);
   QApplication::setWindowIcon(aec::CreateAppIcon());
   // Linux desktops match the window to andor_emccd_gui.desktop by this.
   QGuiApplication::setDesktopFileName("andor_emccd_gui");

@@ -21,6 +21,8 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QPushButton>
+#include <QSettings>
+#include <QSignalBlocker>
 #include <QSpinBox>
 #include <QSplitter>
 #include <QTableWidget>
@@ -495,10 +497,27 @@ TrendPanel::TrendPanel(QWidget* parent) : QWidget(parent) {
   window_s_->setValue(30);
   window_s_->setSuffix(tr(" s"));
   auto* clear = new QPushButton(tr("Clear"), this);
-  auto* normalize = new QCheckBox(tr("Normalize"), this);
+  normalize_ = new QCheckBox(tr("Normalize"), this);
+  fixed_ = new QCheckBox(tr("Fixed scale"), this);
+  fixed_->setToolTip(tr("Fix the value axis to Minimum..Maximum "
+                        "(0..1 when normalized); otherwise it follows the data."));
+  lo_ = new QDoubleSpinBox(this);
+  hi_ = new QDoubleSpinBox(this);
+  for (auto* s : {lo_, hi_}) {
+    s->setRange(-1e12, 1e12);
+    s->setDecimals(3);
+    s->setKeyboardTracking(false);
+    s->setMaximumWidth(180);
+  }
+  lo_->setPrefix(tr("Min "));
+  hi_->setPrefix(tr("Max "));
+  hi_->setValue(1.0);
   side->addWidget(list_);
   side->addWidget(window_s_);
-  side->addWidget(normalize);
+  side->addWidget(normalize_);
+  side->addWidget(fixed_);
+  side->addWidget(lo_);
+  side->addWidget(hi_);
   side->addWidget(clear);
   plot_ = new TrendPlot(this);
   layout->addLayout(side);
@@ -507,7 +526,34 @@ TrendPanel::TrendPanel(QWidget* parent) : QWidget(parent) {
     plot_->SetData({}, {});
     emit ClearRequested();
   });
-  connect(normalize, &QCheckBox::toggled, plot_, &TrendPlot::SetNormalize);
+  connect(normalize_, &QCheckBox::toggled, plot_, &TrendPlot::SetNormalize);
+  connect(fixed_, &QCheckBox::toggled, this, &TrendPanel::ApplyScale);
+  connect(lo_, &QDoubleSpinBox::valueChanged, this, &TrendPanel::ApplyScale);
+  connect(hi_, &QDoubleSpinBox::valueChanged, this, &TrendPanel::ApplyScale);
+  ApplyScale();
+}
+
+void TrendPanel::ApplyScale() {
+  lo_->setEnabled(fixed_->isChecked());
+  hi_->setEnabled(fixed_->isChecked());
+  plot_->SetFixedRange(fixed_->isChecked(), lo_->value(), hi_->value());
+}
+
+void TrendPanel::SaveState(QSettings* s) const {
+  s->setValue("trend/window_s", window_s_->value());
+  s->setValue("trend/normalize", normalize_->isChecked());
+  s->setValue("trend/fixed", fixed_->isChecked());
+  s->setValue("trend/lo", lo_->value());
+  s->setValue("trend/hi", hi_->value());
+}
+
+void TrendPanel::RestoreState(const QSettings& s) {
+  window_s_->setValue(s.value("trend/window_s", 30.0).toDouble());
+  normalize_->setChecked(s.value("trend/normalize", false).toBool());
+  lo_->setValue(s.value("trend/lo", 0.0).toDouble());
+  hi_->setValue(s.value("trend/hi", 1.0).toDouble());
+  fixed_->setChecked(s.value("trend/fixed", false).toBool());
+  ApplyScale();
 }
 
 void TrendPanel::SetNames(const std::vector<std::string>& names) {
@@ -574,6 +620,15 @@ void TrendPanel::Refresh(const LiveProcessor& processor) {
     }
   }
   plot_->SetData(std::move(times), std::move(series));
+  double lo = 0.0;
+  double hi = 0.0;
+  if (!fixed_->isChecked() && plot_->AutoRange(&lo, &hi)) {
+    // Mirror the automatic range so that switching to fixed keeps it.
+    const QSignalBlocker block_lo(lo_);
+    const QSignalBlocker block_hi(hi_);
+    lo_->setValue(lo);
+    hi_->setValue(hi);
+  }
 }
 
 }  // namespace AndorEMCCDcontroller

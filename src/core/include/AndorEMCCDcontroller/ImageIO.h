@@ -3,8 +3,11 @@
  * @brief Writing raw frames to TIFF, PNG, FITS and NumPy files.
  *
  * Pixel rows are written in payload order (row 0 = first row read out by the
- * SDK); no flipping is applied. Multi-frame files are written when the
- * format allows it (TIFF pages, FITS cube, NPY 3-D array).
+ * SDK); no flipping or rotation is applied. The display orientation, when
+ * metadata["display"] holds one, is recorded instead: TIFF Orientation tag,
+ * FITS keywords DISPROT/DISPFLPH/DISPFLPV, and the JSON metadata of every
+ * format that has it. Multi-frame files are written when the format allows it
+ * (TIFF pages, FITS cube, NPY 3-D array).
  */
 
 #ifndef AndorEMCCDcontroller__ImageIO_h
@@ -24,6 +27,27 @@ enum class ImageFormat {
   kFits,    ///< 2-D image or 3-D cube with exposure/gain keywords.
   kNpy,     ///< NumPy array (h, w) or (n, h, w).
 };
+
+/**
+ * @brief How the GUI showed the frame: flip first, then rotate clockwise.
+ *
+ * Stored in metadata as {"display": {"rotation_cw_deg", "flip_horizontal",
+ * "flip_vertical", "tiff_orientation", "order"}}.
+ */
+struct DisplayOrientation {
+  int rotation_cw_deg = 0;  ///< 0, 90, 180 or 270.
+  bool flip_horizontal = false;
+  bool flip_vertical = false;
+};
+
+Json OrientationToJson(const DisplayOrientation& o);
+/** Reads metadata["display"]; the identity when absent. */
+DisplayOrientation OrientationFromMetadata(const Json& metadata);
+/**
+ * TIFF/EXIF Orientation value (1..8) for @p o: a viewer that honors the tag
+ * shows the stored raw frame as the GUI did.
+ */
+int TiffOrientation(const DisplayOrientation& o);
 
 /** Guesses the format from the extension (.tif/.tiff/.png/.fits/.fit/.npy). */
 bool FormatFromPath(const std::string& path, ImageFormat* format);

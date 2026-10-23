@@ -52,6 +52,37 @@ void ImageView::SetFlip(bool horizontal, bool vertical) {
   update();
 }
 
+void ImageView::SetRotation(int degrees_cw) {
+  rotation_ = ((degrees_cw / 90) % 4 + 4) % 4 * 90;
+  fit_pending_ = true;
+  if (auto_fit_) FitToWindow();
+  update();
+}
+
+QTransform ImageView::Orientation() const {
+  const double w = image_.width();
+  const double h = image_.height();
+  // QTransform(m11, m12, m21, m22, dx, dy): x' = m11 x + m21 y + dx,
+  // y' = m12 x + m22 y + dy. Flips act on [0, w] x [0, h] first.
+  const QTransform flip(flip_h_ ? -1.0 : 1.0, 0.0, 0.0, flip_v_ ? -1.0 : 1.0,
+                        flip_h_ ? w : 0.0, flip_v_ ? h : 0.0);
+  QTransform rotate;
+  switch (rotation_) {
+    case 90:
+      rotate = QTransform(0.0, 1.0, -1.0, 0.0, h, 0.0);
+      break;
+    case 180:
+      rotate = QTransform(-1.0, 0.0, 0.0, -1.0, w, h);
+      break;
+    case 270:
+      rotate = QTransform(0.0, -1.0, 1.0, 0.0, 0.0, w);
+      break;
+    default:
+      break;
+  }
+  return flip * rotate;
+}
+
 void ImageView::SetDrawRoiMode(bool on) {
   draw_roi_mode_ = on;
   setCursor(on ? Qt::CrossCursor : Qt::ArrowCursor);
@@ -59,11 +90,12 @@ void ImageView::SetDrawRoiMode(bool on) {
 
 void ImageView::FitToWindow() {
   if (image_.isNull()) return;
-  scale_ = std::min(width() / static_cast<double>(image_.width()),
-                    height() / static_cast<double>(image_.height()));
+  const bool turned = rotation_ == 90 || rotation_ == 270;
+  const double w = turned ? image_.height() : image_.width();
+  const double h = turned ? image_.width() : image_.height();
+  scale_ = std::min(width() / w, height() / h);
   scale_ = std::clamp(scale_, kMinScale, kMaxScale);
-  offset_ = QPointF((width() - image_.width() * scale_) / 2.0,
-                    (height() - image_.height() * scale_) / 2.0);
+  offset_ = QPointF((width() - w * scale_) / 2.0, (height() - h * scale_) / 2.0);
   fit_pending_ = false;
   auto_fit_ = true;
   update();
@@ -81,15 +113,9 @@ void ImageView::ZoomOneToOne() {
 }
 
 QTransform ImageView::ImageToWidget() const {
-  const double w = image_.width();
-  const double h = image_.height();
-  QTransform t;
-  t.translate(offset_.x(), offset_.y());
-  t.scale(scale_, scale_);
-  // Flips act on the image rectangle [0, w] x [0, h].
-  t.translate(flip_h_ ? w : 0.0, flip_v_ ? h : 0.0);
-  t.scale(flip_h_ ? -1.0 : 1.0, flip_v_ ? -1.0 : 1.0);
-  return t;
+  // Points go through the orientation first, then zoom and pan.
+  return Orientation() * QTransform::fromScale(scale_, scale_) *
+         QTransform::fromTranslate(offset_.x(), offset_.y());
 }
 
 QPointF ImageView::WidgetToImage(const QPointF& p) const {

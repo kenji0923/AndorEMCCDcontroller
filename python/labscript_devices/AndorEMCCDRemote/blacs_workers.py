@@ -12,13 +12,16 @@ from __future__ import annotations
 
 import json
 import sys
+import threading
+import time
 from typing import Any, Dict, List, Optional
 
 import numpy as np
 
 from andor_emccd import (AndorEMCCDClient, AndorEMCCDError,
-                         NotControllerError)
+                         ControlDeniedError, NotControllerError)
 from andor_emccd.client import DEFAULT_IPC_DIR
+from .timing import validate_exposures
 
 try:
     from labscript_devices.IMAQdxCamera.blacs_workers import (
@@ -55,8 +58,8 @@ class AndorEMCCDRemoteCamera:
     """Camera interface (IMAQdx style) backed by the EMCCD backend service.
 
     Attributes are backend settings (see ``get_settings``). Buffered shots
-    use ``arm`` (a kinetic series of n frames, normally external trigger);
-    manual continuous mode uses a ``continuous`` run.
+    use a continuous run for software triggers; external-trigger callers
+    of this standalone interface can still use ``arm`` for a kinetic series.
 
     Note: ``arm`` and ``start`` abort any run in progress on the backend.
     """
@@ -96,6 +99,7 @@ class AndorEMCCDRemoteCamera:
         self._software = False
         self._last_seq: Optional[int] = None
         self._last_index = -1
+        self.last_run = None
 
     def _ensure_control(self) -> None:
         """Takes the settings control right (no-op if already held).
@@ -177,15 +181,17 @@ class AndorEMCCDRemoteCamera:
 
     def configure_acquisition(self, continuous: bool = True,
                               bufferCount: int = 5) -> None:
-        """Starts a run: continuous, or a kinetic series of bufferCount."""
+        """Start continuous/software acquisition, or an external kinetic series."""
         self._abort_acquisition = False
         self._last_seq = None
         self._last_index = -1
         self.last_headers = []
-        if continuous:
+        software = self.attributes.get(
+            "trigger_mode", self._client.get_settings().get("trigger_mode")) == "software"
+        if continuous or software:
             self._ensure_control()
             self._client.stop()
-            run = self._client.start({"acquisition_mode": "continuous"})
+            run = self._client.start({**self.attributes, "acquisition_mode": "continuous"})
         else:
             # Pass every attribute programmed so far, so the shot does not
             # depend on changes made to the backend from elsewhere (GUI).
@@ -194,6 +200,7 @@ class AndorEMCCDRemoteCamera:
         for warning in run.get("warnings", []) or []:
             print(f"Warning: {warning}", file=sys.stderr)
         self._run_id = run["run_id"]
+        self.last_run = run
         self._continuous = continuous
         self._software = (self._client.get_settings().get("trigger_mode")
                           == "software")
@@ -289,25 +296,409 @@ class AndorEMCCDRemoteCamera:
         self._client.close()
 
 
+class _FrameSink:
+    """List-like sink used by grab_multiple; only the latest image stays in RAM."""
+
+    def __init__(self, saver, exposures):
+        self.saver = saver
+        self.exposures = exposures
+        self.count = 0
+        self.last_image = None
+        self.repeated = {}
+        for row in exposures:
+            key = (row["name"], row["frametype"])
+            self.repeated[key] = self.repeated.get(key, 0) + 1
+
+    def __len__(self):
+        return self.count
+
+    def extend(self, images):
+        for image in images:
+            file = self.saver.get_open_file()
+            if file is None:
+                raise RuntimeError("Camera sidecar is no longer writable")
+            row = self.exposures[self.count]
+            group = file.require_group(row["name"])
+            label = row["frametype"]
+            if self.repeated[(row["name"], label)] == 1:
+                dataset = group.create_dataset(label, data=image, compression="gzip")
+            else:
+                if label not in group:
+                    group.create_dataset(label, shape=(0,) + image.shape,
+                                         maxshape=(None,) + image.shape,
+                                         dtype=image.dtype, compression="gzip")
+                dataset = group[label]
+                dataset.resize(dataset.shape[0] + 1, axis=0)
+                dataset[-1] = image
+            dataset.attrs.update(CLASS=np.bytes_("IMAGE"),
+                                 IMAGE_VERSION=np.bytes_("1.2"),
+                                 IMAGE_SUBCLASS=np.bytes_("IMAGE_GRAYSCALE"),
+                                 IMAGE_WHITE_IS_ZERO=np.uint8(0))
+            self.count += 1
+            self.last_image = image
+            file.flush()
+
+
 if IMAQdxCameraWorker is not None:
 
     class AndorEMCCDRemoteWorker(IMAQdxCameraWorker):
-        """IMAQdxCameraWorker talking to the EMCCD backend service.
-
-        Worker init kwargs (from the tab): host, control_port, data_port,
-        ipc_dir in addition to the IMAQdxCamera ones.
-        """
+        """Shared backend connection with a cancellable software-shot scheduler."""
 
         interface_class = AndorEMCCDRemoteCamera
 
+        def init(self):
+            import zmq
+            from labscript_utils.ls_zprocess import Context, Event
+            from pythonlib.online_monitor.status import StatusMetrics
+            from .shot_start import EVENT_NAME
+
+            # Do not acquire control, change settings, or connect at startup.
+            self.camera = None
+            self.smart_cache = {}
+            self.continuous_stop = threading.Event()
+            self.continuous_thread = None
+            self.continuous_dt = None
+            self.acquisition_thread = None
+            self._cancel = threading.Event()
+            self._ready = threading.Event()
+            self._shot_error = None
+            self._saver = None
+            self._manual_settings = None
+            self._start_token = None
+            self._start_event = Event(EVENT_NAME, role="wait")
+            self.h5_filepath = None
+            self.image_socket = Context().socket(zmq.REQ)
+            self.image_socket.connect(f"tcp://{self.parent_host}:{self.image_receiver_port}")
+            self._metrics = StatusMetrics("emccd_camera", tags={"device_name": self.device_name},
+                                          logger=self.logger)
+
         def get_camera(self):
             if self.mock:
-                return MockCamera()
+                camera = MockCamera()
+                camera.set_attributes(self.camera_attributes)
+                return camera
             return self.interface_class(
                 host=self.host, control_port=self.control_port,
-                data_port=self.data_port, ipc_dir=self.ipc_dir)
+                data_port=self.data_port, ipc_dir=self.ipc_dir,
+                name=f"BLACS:{self.device_name}",
+                force_control=getattr(self, "force_control", False))
+
+        def connect_to_device(self):
+            if self.camera is None:
+                self.camera = self.get_camera()
+            return self.read_panel()
+
+        def disconnect_from_device(self):
+            if self.continuous_thread is not None:
+                self.stop_continuous()
+            if self.camera is not None:
+                self.camera.close()
+                self.camera = None
+            return {"connected": False}
+
+        def read_panel(self):
+            if self.camera is None:
+                return {"connected": False}
+            if self.mock:
+                return dict(connected=True, mine=True, control={"holder": "mock"},
+                            settings=dict(self.camera.attributes), info={}, status={})
+            client = self.camera._client
+            status = client.get_status()
+            self._metrics.send({key: value for key, value in status.items()
+                                if isinstance(value, (float, int))})
+            control = client.get_control()
+            return dict(connected=True, settings=client.get_settings(),
+                        info=client.get_info(), status=status, control=control,
+                        mine=bool(control and control.get("holder_id") == client.client_id))
+
+        def panel_action(self, action, values=None):
+            """Return expected transport/control errors to the panel, not BLACS fatal state."""
+            try:
+                if action == "connect":
+                    return self.connect_to_device()
+                if action == "disconnect":
+                    return self.disconnect_from_device()
+                if action == "read":
+                    return self.read_panel()
+                if self.camera is None:
+                    raise RuntimeError("Connect to the backend first")
+                if action in ("request", "take_control"):
+                    if not self.mock:
+                        self.camera._client.acquire_control(force=action == "take_control")
+                elif action == "release":
+                    if self.continuous_thread is not None:
+                        self.stop_continuous()
+                    if not self.mock:
+                        self.camera._client.release_control()
+                elif action == "settings":
+                    if self.continuous_thread is not None:
+                        raise RuntimeError("Stop continuous preview before changing settings")
+                    if not self.mock and not self.camera._client.has_control():
+                        raise RuntimeError("Request control before changing settings")
+                    self.camera.set_attributes(values)
+                return self.read_panel()
+            except ControlDeniedError as error:
+                return {**self.read_panel(), "action_error": str(error)}
+            except Exception as error:
+                return {"error": str(error)}
 
         def get_attributes_as_dict(self, visibility_level):
+            if self.camera is None:
+                return {}
             if isinstance(self.camera, AndorEMCCDRemoteCamera):
                 return self.camera.get_attributes(visibility_level)
             return super().get_attributes_as_dict(visibility_level)
+
+        def snap(self):
+            if self.camera is None:
+                raise RuntimeError("Connect and request control before snapping")
+            return super().snap()
+
+        def start_continuous(self, dt):
+            if self.camera is None:
+                raise RuntimeError("Connect and request control before continuous preview")
+            # Read back the GUI's current settings, not a cache from an earlier shot.
+            if not self.mock:
+                self.camera.attributes = self.camera._client.get_settings()
+            return super().start_continuous(dt)
+
+        def stop_continuous(self, pause=False):
+            self.continuous_stop.set()
+            self.camera.abort_acquisition()  # unblock external-trigger waits as well
+            self.continuous_thread.join()
+            self.continuous_thread = None
+            self.continuous_stop.clear()
+            self.camera.stop_acquisition()
+            if not pause:
+                self.continuous_dt = None
+
+        def continuous_loop(self, dt):
+            try:
+                super().continuous_loop(dt)
+            except Exception:
+                if not self.continuous_stop.is_set():
+                    self.logger.exception("Continuous camera preview failed")
+
+        def prepare_shot_start(self, token):
+            self._start_token = token
+
+        def transition_to_buffered(self, device_name, h5_filepath, initial_values, fresh):
+            import labscript_utils.h5_lock  # noqa: F401
+            import h5py
+            import labscript_utils.properties
+            from labscript_utils.shared_drive import path_to_local
+            from pythonlib.data_saver import DataSaver
+
+            # Request control on EVERY transition, including empty shots and repeats.
+            self.connect_to_device()
+            if not self.mock:
+                self.camera._ensure_control()
+            self._cancel.clear()
+            self._ready.clear()
+            self._shot_error = None
+            self._sink = None
+            self._trigger_times = []
+            if self.continuous_thread is not None:
+                self.stop_continuous(pause=True)
+            try:
+                path = path_to_local(h5_filepath) if getattr(self, "is_remote", False) else h5_filepath
+                with h5py.File(path, "r") as file:
+                    group = file["devices"][device_name]
+                    props = labscript_utils.properties.get(file, device_name, "device_properties")
+                    if group.attrs.get("trigger_method") != "software":
+                        raise ValueError("Recompile this shot for software triggering")
+                    if "waits" in file and len(file["waits"]):
+                        raise ValueError("Software camera shots do not support labscript waits")
+                    rows = group["EXPOSURES"][:] if "EXPOSURES" in group else []
+                    self.exposures = [dict(t=float(row["t"]),
+                        exposure_time_s=float(row["exposure_time_s"]),
+                        name=row["name"].decode() if isinstance(row["name"], bytes) else row["name"],
+                        frametype=row["frametype"].decode() if isinstance(row["frametype"], bytes) else row["frametype"])
+                        for row in rows]
+                    self.exposures = validate_exposures(self.exposures,
+                        props.get("minimum_recovery_time", 0), group.attrs["stop_time"])
+                    stop_time = float(group.attrs["stop_time"])
+                self.h5_filepath = path
+                self.stop_acquisition_timeout = props["stop_acquisition_timeout"]
+                if not self.exposures:
+                    return {}
+                if not self._start_token:
+                    raise RuntimeError("BLACS science-start notification was not registered")
+                settings = dict(props["camera_attributes"])
+                if settings.get("trigger_mode") != "software":
+                    raise ValueError("Only software-triggered buffered shots are supported")
+                self._manual_settings = (dict(self.camera.attributes) if self.mock
+                                         else self.camera._client.get_settings())
+                settings.update(trigger_mode="software", acquisition_mode="continuous",
+                                exposure_time_s=self.exposures[0]["exposure_time_s"])
+                self.camera.attributes = {}
+                self.camera.set_attributes(settings)
+                self.camera.configure_acquisition(continuous=False, bufferCount=len(self.exposures))
+                if not self.mock:
+                    timings = self.camera.last_run["timings"]
+                    recovery = max(float(timings["kinetic_s"]),
+                                   float(timings["exposure_s"]) + float(timings["readout_s"]))
+                    validate_exposures(self.exposures, recovery, stop_time)
+                    if self.exposures[-1]["t"] + timings["exposure_s"] > stop_time + 1e-12:
+                        raise ValueError("Actual camera exposure extends beyond the shot stop time")
+                    window = props.get("staircase_acquire_s")
+                    if window is not None and timings["exposure_s"] > float(window) + 1e-6:
+                        raise ValueError("Actual exposure exceeds staircase acquisition window")
+                else:
+                    timings = {}
+                self._saver = DataSaver(path, device_name=device_name,
+                                        acquisition_type="camera", data_label="images")
+                self._saver.add_attribute("camera", device_name)
+                self._saver.add_attribute("trigger_method", "software")
+                self._saver.add_attribute("timing_origin", "receipt of BLACS science_starting")
+                self._saver.add_attribute("timings", json.dumps(timings))
+                self._saver.add_attribute("camera_settings", json.dumps(
+                    settings if self.mock else self.camera._client.get_settings()))
+                level = props.get("saved_attribute_visibility_level")
+                if level is not None:
+                    for key, value in self.get_attributes_as_dict(level).items():
+                        self._saver.add_attribute(key, value)
+                self.acquisition_thread = threading.Thread(target=self._acquire_shot,
+                                                           name="emccd-shot", daemon=True)
+                self.acquisition_thread.start()
+                if not self._ready.wait(10):
+                    raise RuntimeError("Camera acquisition thread did not become ready")
+                if self._shot_error is not None:
+                    raise RuntimeError("Camera acquisition setup failed") from self._shot_error
+                return {}
+            except Exception:
+                self.abort()
+                raise
+
+        def _send_triggers(self, origin):
+            try:
+                for row in self.exposures:
+                    if self._cancel.wait(max(0, origin + row["t"] - time.monotonic())):
+                        return
+                    self._trigger_times.append(time.monotonic() - origin)
+                    self.camera._client.software_trigger()
+            except Exception as error:
+                self._shot_error = error
+                self.camera.abort_acquisition()
+
+        def _acquire_shot(self):
+            import h5py
+            from zprocess import TimeoutError as EventTimeout
+            trigger_thread = None
+            try:
+                if not self._saver.open_for_writing("a"):
+                    raise RuntimeError("Could not open camera sidecar for writing")
+                self._sink = _FrameSink(self._saver, self.exposures)
+                self._ready.set()
+                while not self._cancel.is_set():
+                    self._saver.get_open_file()  # renew long-held sidecar lock leases
+                    try:
+                        self._start_event.wait(self._start_token, timeout=0.1)
+                        break
+                    except EventTimeout:
+                        continue
+                if self._cancel.is_set():
+                    return
+                origin = time.monotonic()
+                if self.mock:
+                    for row in self.exposures:
+                        if self._cancel.wait(max(0, origin + row["t"] - time.monotonic())):
+                            return
+                        self._trigger_times.append(time.monotonic() - origin)
+                        self._sink.extend([self.camera.snap()])
+                else:
+                    trigger_thread = threading.Thread(target=self._send_triggers,
+                                                       args=(origin,), daemon=True)
+                    trigger_thread.start()
+                    self.camera.grab_multiple(len(self.exposures), self._sink)
+                file = self._saver.get_open_file()
+                file.create_dataset("trigger_sent_times_s", data=self._trigger_times)
+                file.create_dataset("requested_start_times_s", data=[row["t"] for row in self.exposures])
+                file.create_dataset("frame_headers", dtype=h5py.string_dtype(),
+                    data=[json.dumps(header) for header in getattr(self.camera, "last_headers", [])])
+                file.attrs["failed_shot"] = len(self._sink) != len(self.exposures)
+            except Exception as error:
+                self._shot_error = self._shot_error or error
+            finally:
+                self._ready.set()
+                self._cancel.set()
+                if trigger_thread is not None:
+                    trigger_thread.join()
+                try:
+                    if not self.mock:
+                        self.camera.stop_acquisition()
+                except Exception as error:
+                    self._shot_error = self._shot_error or error
+                finally:
+                    self._saver.close_data_file()
+
+        def _restore_manual(self):
+            settings, self._manual_settings = self._manual_settings, None
+            if settings is not None and (self.mock or self.camera._client.has_control()):
+                self.camera.attributes = {}
+                self.camera.set_attributes(settings)
+            self._start_token = None
+            self.h5_filepath = None
+            if (self.continuous_dt is not None and self.continuous_thread is None
+                    and (self.mock or self.camera._client.has_control())):
+                self.start_continuous(self.continuous_dt)
+
+        def transition_to_manual(self):
+            import labscript_utils.h5_lock  # noqa: F401
+            import h5py
+            try:
+                started = time.monotonic()
+                if self.acquisition_thread is not None:
+                    self.acquisition_thread.join(timeout=self.stop_acquisition_timeout)
+                    if self.acquisition_thread.is_alive():
+                        self.abort()
+                        raise RuntimeError("Software camera shot did not finish before timeout")
+                    self.acquisition_thread = None
+                    if self._shot_error is not None or self._sink is None or len(self._sink) != len(self.exposures):
+                        error = self._shot_error or RuntimeError("Incomplete camera shot")
+                        self.abort()
+                        raise RuntimeError("Software camera shot failed") from error
+                    self.logger.info("Camera wait: %.3f s", time.monotonic() - started)
+                    started = time.monotonic()
+                    if not self._saver.merge_into_shot(cleanup=True):
+                        raise RuntimeError("Camera sidecar was not merged")
+                    self._saver = None
+                    # Keep the established IMAQdx images/<orientation>/<name>/<frametype> API.
+                    with h5py.File(self.h5_filepath, "r+") as file:
+                        source = file[f"data/{self.device_name}/camera/images"]
+                        images = file.require_group("images")
+                        orientation = self.orientation or self.device_name
+                        if orientation in images:
+                            raise RuntimeError(f"Image destination {orientation!r} already exists")
+                        target = images.create_group(orientation)
+                        target.attrs.update(source.attrs)
+                        for name in dict.fromkeys(row["name"] for row in self.exposures):
+                            target[name] = source[name]
+                    self.logger.info("Camera merge: %.3f s", time.monotonic() - started)
+                    self._send_image_to_parent(self._sink.last_image)
+                    self._sink = None
+                return True
+            finally:
+                self._restore_manual()
+
+        def abort(self):
+            self._cancel.set()
+            if self.camera is not None and self._manual_settings is not None:
+                self.camera.abort_acquisition()
+            if self.acquisition_thread is not None:
+                self.acquisition_thread.join()
+                self.acquisition_thread = None
+            if self._saver is not None:
+                self._saver.cleanup()
+                self._saver = None
+            self._sink = None
+            self._restore_manual()
+            return True
+
+        def shutdown(self):
+            # Shutdown must not restart continuous preview.
+            self.continuous_dt = None
+            self.abort()
+            self.disconnect_from_device()
+            self.image_socket.close(linger=0)
+            self._metrics.close()

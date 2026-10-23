@@ -23,6 +23,7 @@ class QComboBox;
 class QLabel;
 class QLineEdit;
 class QListWidget;
+class QSettings;
 class QSpinBox;
 class QTableWidget;
 class QDoubleSpinBox;
@@ -88,13 +89,22 @@ class TrendPanel : public QWidget {
   void Refresh(const LiveProcessor& processor);
   std::vector<std::string> Selected() const;
   void Select(const std::vector<std::string>& names);
+  /** Time window, normalization and value-axis scale, for QSettings. */
+  void SaveState(QSettings* s) const;
+  void RestoreState(const QSettings& s);
 
  signals:
   void ClearRequested();
 
  private:
+  void ApplyScale();
+
   QListWidget* list_;
   QDoubleSpinBox* window_s_;
+  QCheckBox* normalize_;
+  QCheckBox* fixed_;
+  QDoubleSpinBox* lo_;
+  QDoubleSpinBox* hi_;
   TrendPlot* plot_;
   std::vector<std::string> names_;
 };

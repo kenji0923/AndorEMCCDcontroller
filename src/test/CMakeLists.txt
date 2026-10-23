@@ -15,7 +15,9 @@ if(AEC_BUILD_GUI)
     target_link_libraries(test_analysis PRIVATE AndorEMCCDcontroller::Analysis)
 
     aec_add_test(test_imageio test_imageio.cc)
-    target_link_libraries(test_imageio PRIVATE AndorEMCCDcontroller::ImageIO)
+    # libtiff and CFITSIO read back the orientation tag and keywords.
+    target_link_libraries(test_imageio PRIVATE AndorEMCCDcontroller::ImageIO
+                          TIFF::TIFF CFITSIO::CFITSIO)
 endif()
 
 if(AEC_BUILD_BACKEND)

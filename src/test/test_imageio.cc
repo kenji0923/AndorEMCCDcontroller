@@ -7,7 +7,9 @@
 #include <filesystem>
 #include <fstream>
 
+#include <fitsio.h>
 #include <gtest/gtest.h>
+#include <tiffio.h>
 
 #include <AndorEMCCDcontroller/ImageIO.h>
 
@@ -97,4 +99,69 @@ TEST(ImageIO, PngFitsNpyAreWritten) {
   char sig[4] = {0};
   png.read(sig, 4);
   EXPECT_EQ(std::string(sig + 1, 3), "PNG");
+}
+
+TEST(ImageIO, TiffOrientationMatchesDisplay) {
+  auto value = [](int rotation, bool h, bool v) {
+    aec::DisplayOrientation o;
+    o.rotation_cw_deg = rotation;
+    o.flip_horizontal = h;
+    o.flip_vertical = v;
+    return aec::TiffOrientation(o);
+  };
+  EXPECT_EQ(value(0, false, false), 1);
+  EXPECT_EQ(value(0, true, false), 2);
+  EXPECT_EQ(value(180, false, false), 3);
+  EXPECT_EQ(value(0, true, true), 3);
+  EXPECT_EQ(value(0, false, true), 4);
+  EXPECT_EQ(value(270, true, false), 5);
+  EXPECT_EQ(value(90, false, false), 6);
+  EXPECT_EQ(value(90, true, false), 7);
+  EXPECT_EQ(value(270, false, false), 8);
+  EXPECT_EQ(value(90, false, true), 5);
+
+  aec::DisplayOrientation o;
+  o.rotation_cw_deg = 90;
+  o.flip_vertical = true;
+  const aec::Json meta{{"display", aec::OrientationToJson(o)}};
+  const aec::DisplayOrientation back = aec::OrientationFromMetadata(meta);
+  EXPECT_EQ(back.rotation_cw_deg, 90);
+  EXPECT_FALSE(back.flip_horizontal);
+  EXPECT_TRUE(back.flip_vertical);
+  EXPECT_EQ(meta["display"]["tiff_orientation"], 5);
+  EXPECT_EQ(aec::OrientationFromMetadata(aec::Json()).rotation_cw_deg, 0);
+}
+
+TEST(ImageIO, OrientationIsRecordedInFiles) {
+  aec::DisplayOrientation o;
+  o.rotation_cw_deg = 90;
+  const aec::Json meta{{"display", aec::OrientationToJson(o)}};
+  const std::vector<aec::Frame> frames{MakeFrame(6, 4, 0)};
+  const fs::path dir = TempDir();
+  std::string error;
+  const std::string tif = (dir / "rot.tif").string();
+  ASSERT_TRUE(aec::WriteTiff(tif, frames, meta, &error)) << error;
+  TIFF* t = TIFFOpen(tif.c_str(), "r");
+  ASSERT_NE(t, nullptr);
+  std::uint16_t orientation = 0;
+  ASSERT_TRUE(TIFFGetField(t, TIFFTAG_ORIENTATION, &orientation));
+  EXPECT_EQ(orientation, 6);
+  std::uint32_t width = 0;
+  TIFFGetField(t, TIFFTAG_IMAGEWIDTH, &width);
+  EXPECT_EQ(width, 6u);  // data stay unrotated
+  TIFFClose(t);
+
+  const std::string fits_path = (dir / "rot.fits").string();
+  ASSERT_TRUE(aec::WriteFits(fits_path, frames, meta, &error)) << error;
+  fitsfile* f = nullptr;
+  int status = 0;
+  fits_open_file(&f, fits_path.c_str(), READONLY, &status);
+  int rotation = -1;
+  int flip_h = -1;
+  fits_read_key(f, TINT, "DISPROT", &rotation, nullptr, &status);
+  fits_read_key(f, TLOGICAL, "DISPFLPH", &flip_h, nullptr, &status);
+  fits_close_file(f, &status);
+  EXPECT_EQ(status, 0);
+  EXPECT_EQ(rotation, 90);
+  EXPECT_EQ(flip_h, 0);
 }

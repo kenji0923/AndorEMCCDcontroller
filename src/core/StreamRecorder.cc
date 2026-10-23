@@ -1,4 +1,5 @@
 #include <AndorEMCCDcontroller/StreamRecorder.h>
+#include <AndorEMCCDcontroller/ImageIO.h>
 #include <fcntl.h>
 #include <sys/stat.h>
 
@@ -66,7 +67,7 @@ void MergeLoss(Json* target, const Json& loss) {
 }
 
 bool WritePage(TIFF* file, const Frame& f, const Json& accounting,
-               const Json& metadata) {
+               const Json& metadata, int orientation) {
   const auto& h = f.header;
   if (!f.data || h.width <= 0 || h.height <= 0 ||
       f.data->size() != h.PayloadBytes())
@@ -87,7 +88,8 @@ bool WritePage(TIFF* file, const Frame& f, const Json& accounting,
       !TIFFSetField(file, TIFFTAG_PLANARCONFIG, PLANARCONFIG_CONTIG) ||
       !TIFFSetField(file, TIFFTAG_COMPRESSION, COMPRESSION_NONE) ||
       !TIFFSetField(file, TIFFTAG_ROWSPERSTRIP, h.height) ||
-      !TIFFSetField(file, TIFFTAG_SOFTWARE, "AndorEMCCDcontroller stream"))
+      !TIFFSetField(file, TIFFTAG_SOFTWARE, "AndorEMCCDcontroller stream") ||
+      !TIFFSetField(file, TIFFTAG_ORIENTATION, orientation))
     return false;
   Json description{
       {"frame", h}, {"delivery", f.delivery}, {"recording", accounting}};
@@ -157,6 +159,7 @@ bool StreamRecorder::Start(const std::string& path, double max_fps,
     max_bytes_ = queue_bytes;
     bytes_ = 0;
     metadata_ = metadata;
+    tiff_orientation_ = TiffOrientation(OrientationFromMetadata(metadata));
     pending_loss_ = {{"server_loss", {{"count", 0}}},
                      {"client_loss", {{"count", 0}}}};
   }
@@ -245,7 +248,7 @@ void StreamRecorder::WriteLoop(void* handle) {
         status_.queued = queue_.size();
       }
       if (!WritePage(file, pending.frame, pending.accounting,
-                     first ? metadata_ : Json())) {
+                     first ? metadata_ : Json(), tiff_orientation_)) {
         throw std::runtime_error(
             "BigTIFF write/flush failed (check disk space)");
       }

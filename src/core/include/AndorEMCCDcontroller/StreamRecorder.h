@@ -55,6 +55,7 @@ class StreamRecorder {
   std::size_t max_bytes_ = 0;
   std::size_t bytes_ = 0;
   Json metadata_;
+  int tiff_orientation_ = 1;
   Json pending_loss_;
 };
 }  // namespace AndorEMCCDcontroller

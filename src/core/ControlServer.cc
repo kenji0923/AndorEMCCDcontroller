@@ -211,6 +211,7 @@ Json ControlServer::Dispatch(const std::string& cmd, const Json& args,
                              bool* deferred, std::vector<Frame>* frames) {
   if (cmd == "ping") {
     return Json{{"protocol", kProtocolVersion},
+                {"version", AEC_VERSION},
                 {"server_time", UnixTimeNow()},
                 {"simulated", simulated_}};
   }

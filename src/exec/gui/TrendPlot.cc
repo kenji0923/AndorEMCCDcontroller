@@ -29,6 +29,60 @@ void TrendPlot::SetNormalize(bool on) {
   update();
 }
 
+void TrendPlot::SetFixedRange(bool on, double lo, double hi) {
+  fixed_ = on;
+  fixed_lo_ = lo;
+  fixed_hi_ = hi;
+  update();
+}
+
+std::vector<TrendPlot::Series> TrendPlot::Prepared() const {
+  std::vector<Series> series = series_;
+  if (!normalize_) return series;
+  // Each series is scaled to 0..1 over the visible window.
+  for (auto& s : series) {
+    double a = std::numeric_limits<double>::infinity();
+    double b = -a;
+    for (double v : s.values) {
+      if (std::isfinite(v)) {
+        a = std::min(a, v);
+        b = std::max(b, v);
+      }
+    }
+    const double span = b > a ? b - a : 1.0;
+    for (double& v : s.values) v = (v - a) / span;
+    s.name += tr(" [%1, %2]").arg(a, 0, 'g', 4).arg(b, 0, 'g', 4);
+  }
+  return series;
+}
+
+bool TrendPlot::DataRange(const std::vector<Series>& series, double* lo,
+                          double* hi) {
+  double a = std::numeric_limits<double>::infinity();
+  double b = -a;
+  for (const auto& s : series) {
+    for (double v : s.values) {
+      if (std::isfinite(v)) {
+        a = std::min(a, v);
+        b = std::max(b, v);
+      }
+    }
+  }
+  if (!std::isfinite(a)) return false;
+  if (b <= a) {
+    b = a + 1.0;
+    a -= 1.0;
+  }
+  const double pad = 0.05 * (b - a);
+  *lo = a - pad;
+  *hi = b + pad;
+  return true;
+}
+
+bool TrendPlot::AutoRange(double* lo, double* hi) const {
+  return times_.size() >= 2 && DataRange(Prepared(), lo, hi);
+}
+
 void TrendPlot::paintEvent(QPaintEvent*) {
   QPainter p(this);
   p.fillRect(rect(), palette().base());
@@ -36,46 +90,20 @@ void TrendPlot::paintEvent(QPaintEvent*) {
   const QRectF plot(80, 8, width() - 90, height() - 34);
   p.setPen(text);
   p.drawRect(plot);
-  // Work on a copy: normalization must not accumulate across repaints.
-  std::vector<Series> series = series_;
-  if (times_.size() < 2 || series.empty()) {
+  if (times_.size() < 2 || series_.empty()) {
     p.drawText(plot, Qt::AlignCenter, tr("Select values to plot"));
     return;
   }
-  if (normalize_) {
-    // Each series is scaled to 0..1 over the visible window.
-    for (auto& s : series) {
-      double a = std::numeric_limits<double>::infinity();
-      double b = -a;
-      for (double v : s.values) {
-        if (std::isfinite(v)) {
-          a = std::min(a, v);
-          b = std::max(b, v);
-        }
-      }
-      const double span = b > a ? b - a : 1.0;
-      for (double& v : s.values) v = (v - a) / span;
-      s.name += tr(" [%1, %2]").arg(a, 0, 'g', 4).arg(b, 0, 'g', 4);
-    }
+  // Work on a copy: normalization must not accumulate across repaints.
+  const std::vector<Series> series = Prepared();
+  double lo = 0.0;
+  double hi = 1.0;
+  if (fixed_ && fixed_hi_ > fixed_lo_) {
+    lo = fixed_lo_;
+    hi = fixed_hi_;
+  } else if (!DataRange(series, &lo, &hi)) {
+    return;
   }
-  double lo = std::numeric_limits<double>::infinity();
-  double hi = -lo;
-  for (const auto& s : series) {
-    for (double v : s.values) {
-      if (std::isfinite(v)) {
-        lo = std::min(lo, v);
-        hi = std::max(hi, v);
-      }
-    }
-  }
-  if (!std::isfinite(lo)) return;
-  if (hi <= lo) {
-    hi = lo + 1.0;
-    lo -= 1.0;
-  }
-  const double pad = 0.05 * (hi - lo);
-  lo -= pad;
-  hi += pad;
   const double t0 = times_.front();
   const double t1 = std::max(times_.back(), t0 + 1e-9);
   auto map = [&](double t, double v) {

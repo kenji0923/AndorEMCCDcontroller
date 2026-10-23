@@ -1,138 +1,146 @@
 # AndorEMCCDRemote — labscript-suite device
 
-A labscript-suite camera device for the Andor iXon3 EMCCD that is driven by
-the `andor_emccd_backend` service (this repository), possibly running on
-another machine. BLACS talks to the backend over ZeroMQ through the
-`andor_emccd` Python client. The device follows the
-`IMAQdxCamera` pattern (like `PylonCamera`, `SpinnakerCamera`,
-`AndorSolis`): same BLACS tab (snap / continuous / attributes dialog), same
-HDF5 layout (`images/<orientation or name>/<name>/<frametype>`).
+BLACS controls the remote `andor_emccd_backend` through the Python client.
+The tab retains the IMAQdx image viewer and adds the FanLab standard settings
+panel: shared committing spinboxes, unit selection, bulk Enter commits,
+readback reconciliation, and `FrontPanelPersistence`.
 
-| File | Content |
-| --- | --- |
-| `labscript_devices.py` | `AndorEMCCDRemote(IMAQdxCamera)`; extra connection-table args `host`, `control_port`, `data_port`, `ipc_dir` |
-| `blacs_tabs.py` | `AndorEMCCDRemoteTab(IMAQdxCameraTab)`; passes the backend address to the worker |
-| `blacs_workers.py` | `AndorEMCCDRemoteCamera` (camera interface over `AndorEMCCDClient`) and `AndorEMCCDRemoteWorker(IMAQdxCameraWorker)` |
-| `register_classes.py` | registers the BLACS tab |
+## Manual controls
 
-## How a shot runs
+- **Connect** opens a read-only connection and reads the current backend values.
+  Worker startup and restoring the panel do not take control or change settings.
+- **Request control** / **Release control** manage the backend control right.
+  The holder and camera temperature appear in the status line.
+  A connected tab is read-only until it owns control. **Take control** explicitly
+  transfers control from the displayed holder (for example the native GUI).
+  The worker is named `BLACS:<device>`; ownership is determined by its unique
+  client ID, so matching display names cannot collide.
+- The settings pages cover the same 40 fields as the native Qt SettingsPanel:
+  acquisition, readout, EM gain, image area, cooling, and shutter.
+- Numeric entries commit on Enter or a step; a commit sends pending fields in
+  one transaction. Escape reverts edits. Readbacks preserve focused/pending
+  edits; inactive edits expire after 60 seconds. Failed writes remain visible.
+- **Snap**, **Continuous**, and **Stop** retain the camera preview functions.
+  Stop preview before editing settings. The Attributes dialog remains available
+  for copying settings into a connection table.
+- Settings are persisted in BLACS and each shot's front panel. Reconnecting
+  reads the backend's state rather than programming saved panel values.
 
-* `transition_to_buffered`: `camera_attributes` are sent with `set_settings`
-  (only changed ones, IMAQdx "smart programming"), then the backend is
-  **armed** for a kinetic series with as many frames as `expose()` calls
-  (`arm(n, settings=<all attributes programmed so far>)`). Note `arm` aborts
-  any run in progress on the backend (e.g. one started from the Qt GUI).
-* During the shot an acquisition thread calls `wait(run_id, n_frames=k+1)`
-  with a short timeout and `fetch`es the new frames, so the image list
-  fills as frames arrive.
-* `transition_to_manual`: waits up to `stop_acquisition_timeout`, saves the
-  images, calls `stop` (no-op if the run completed). On abort `stop` is sent
-  immediately (on a separate socket, so it is not queued behind the wait).
-* Manual mode: *Snap* arms a single frame (and sends a software trigger if
-  `trigger_mode == "software"`); *Continuous* starts a `continuous` run and
-  shows the latest frames (`fetch_latest`).
+The connection-table properties `poll_interval_ms=100`,
+`apply_timeout_ms=3000`, and `edit_expiry_ms=60000` control panel timing.
 
-Attributes are the backend settings keys (`exposure_time_s`, `em_gain`,
-`trigger_mode`, `hbin`, `vstart`, ...; see the main README / `get_settings`).
-The BLACS *Attributes* dialog lists them in three visibility levels and the
-selected level is saved with every shot.
+## Software-triggered shots
 
-## Installation
-
-1. Install the client into the Python environment that runs BLACS
-   (and lyse, if it needs it):
-
-   ```bash
-   pip install /path/to/AndorEMCCDcontroller/python   # numpy, pyzmq
-   ```
-
-2. Copy (or symlink) this folder into your labscript `user_devices` package
-   (`~/labscript-suite/userlib/user_devices/` by default, it must contain an
-   `__init__.py`):
-
-   ```bash
-   cp -r /path/to/AndorEMCCDcontroller/python/labscript_devices/AndorEMCCDRemote \
-         ~/labscript-suite/userlib/user_devices/
-   ```
-
-   `labconfig` must list the folder, e.g.
-   `[DEFAULT] user_devices = user_devices` (the default). If you place it
-   under a different package name, edit the import path in
-   `register_classes.py`.
-
-3. Make sure BLACS can reach the backend: on the backend host open TCP
-   ports 47100 (control) and 47101 (data) in the firewall. When BLACS runs on
-   the backend host itself, the IPC sockets in `ipc_dir` are used
-   automatically.
-
-Do not put `python/` of this repository on `sys.path` of labscript as a
-whole folder *and* expect `labscript_devices` to resolve to it — the
-`python/labscript_devices/` folder here is only a source location (it has no
-`__init__.py`, so the real `labscript_devices` package always wins).
-
-## Example connection table
+Only software triggering is implemented for buffered shots. There is no
+trigger parent, digital connection, or trigger pulse. Existing externally
+triggered connection tables and old compiled shots must be updated/recompiled.
+The standalone `AndorEMCCDRemoteCamera` Python interface still supports external
+acquisition for clients outside this labscript device.
 
 ```python
-from labscript import start, stop
-from labscript_devices.PulseBlasterUSB import PulseBlasterUSB
-from user_devices.AndorEMCCDRemote.labscript_devices import AndorEMCCDRemote
+from user_devices.fanlab_devices.AndorEMCCDRemote.labscript_devices import AndorEMCCDRemote
 
-PulseBlasterUSB(name="pb")
-
+# Keep the experiment's normal master pseudoclock in the connection table.
 AndorEMCCDRemote(
     name="emccd",
-    parent_device=pb.direct_outputs,
-    connection="flag 0",
-    host="camera-pc",             # machine running andor_emccd_backend
-    control_port=47100,
-    data_port=47101,
-    trigger_duration=10e-6,
-    minimum_recovery_time=30e-3,  # >= kinetic cycle (readout) time
+    host="camera-pc",
     orientation="side",
     camera_attributes={
-        "trigger_mode": "external",
+        "trigger_mode": "software",
         "exposure_time_s": 1e-3,
-        "em_gain_enabled": True,   # EM gain is off unless enabled
+        "em_gain_enabled": True,
         "em_gain": 100,
-        "output_amplifier": 0,
-        "frame_transfer": False,
         "hbin": 1, "vbin": 1,
-        "hstart": 1, "hend": 0, "vstart": 1, "vend": 0,
     },
-    manual_mode_camera_attributes={"trigger_mode": "software"},
+    minimum_recovery_time=0.05,  # minimum start-to-start spacing, seconds
     stop_acquisition_timeout=10.0,
+    force_control=False,
 )
-
-if __name__ == "__main__":
-    start()
-    stop(1)
 ```
-
-In an experiment script:
 
 ```python
 start()
-t = 0.1
-emccd.expose(t, "fluorescence", frametype="atoms")
-emccd.expose(t + 0.05, "fluorescence", frametype="background")
-stop(t + 0.2)
+emccd.expose(0.1000, "fluorescence", frametype="atoms", exposure_time=1e-3)
+emccd.expose(0.2000, "fluorescence", frametype="background", exposure_time=1e-3)
+stop(0.3)
 ```
 
-## Testing without labscript
+`exposure_time` is in seconds and defaults to `camera_attributes['exposure_time_s']`.
+All exposures within a shot must use the same duration. The SDK only accepts
+software triggers in continuous (run-till-abort) mode; the worker configures
+that mode automatically and stops after receiving the requested frames.
 
-`AndorEMCCDRemoteCamera` has no labscript dependency. With a simulated
-backend running:
+**Every start time must be a non-negative multiple of 0.1 ms (100 µs).**
+For example, `0.1000` and `0.1001` seconds are valid; `0.10001` is rejected.
+Values are never silently rounded. Validation occurs both during compilation
+and before buffered acquisition, so edited/old HDF5 files cannot bypass it.
+Exposure duration itself does not have this grid restriction. Overlapping
+exposures, insufficient camera recovery time, exposures extending past `stop`,
+and shots containing labscript waits are also rejected.
+
+The time origin is **receipt of BLACS's `science_starting` notification**,
+just before BLACS asks the master pseudoclock to start. The tab registers this
+callback automatically; a fresh event token is used for every attempt, including
+repeats. A Python thread waits on absolute monotonic deadlines and sends
+software-trigger commands. It never starts the schedule during buffered
+programming. The master must start immediately when BLACS requests it; an
+externally delayed master start is not supported.
+
+The 100 µs grid is an input restriction, **not a 100 µs accuracy guarantee**.
+OS scheduling, event delivery, master start, network transport, and camera
+latency contribute jitter/offset. The saved `trigger_sent_times_s` records
+command dispatch times relative to the notification, not measured exposure
+start times.
+
+## Control and shot lifecycle
+
+`transition_to_buffered` always requests control, even for empty shots or
+unchanged/repeated settings. If another GUI holds control, the transition fails
+with the holder's name. Release it there first, or explicitly configure
+`force_control=True` to permit takeover for this worker.
+
+The worker snapshots the current manual settings, applies the full shot settings,
+checks actual camera timings, and starts acquisition. Triggering and receiving
+use separate threads/sockets, so waiting for an image does not delay the next
+scheduled trigger. Abort cancels pending triggers and stops acquisition.
+Background exceptions and missing frames cause the shot to fail.
+
+Images stream into a `pythonlib.data_saver.DataSaver` sidecar. The main shot
+file stays closed during acquisition. `transition_to_manual` joins the thread,
+merges into `/data/<device>/camera/images`, and exposes the same data through
+`/images/<orientation or device>/<name>/<frametype>` for IMAQdx compatibility.
+Requested/dispatch times, camera settings, actual timings, and frame headers
+are saved with the images. Abort deletes the sidecar without merging. The
+worker restores pre-shot manual settings if it still owns control.
+
+## Installation
+
+Install the client with `pip install /path/to/AndorEMCCDcontroller/python`.
+The tab also needs the lab's existing `user_devices.fanlab_devices.utils` and
+`pythonlib.data_saver` / `pythonlib.online_monitor` modules in the DAQ environment.
+
+Copy this device directory into
+`~/labscript-suite/userlib/user_devices/fanlab_devices/AndorEMCCDRemote/`,
+then restart its BLACS tab and recompile the connection table. The registration
+file targets that FanLab package. If installed directly under `user_devices`,
+adjust `register_classes.py` accordingly. Do not add the repository's whole
+`python/` source directory to labscript's import path: it can shadow an editable
+installation of the real `labscript_devices` package.
+
+This repository copy does not automatically replace a separately installed
+FanLab copy. Backend ports default to 47100/47101; local IPC is selected when
+the sockets exist in `ipc_dir` (default `/run/andor-emccd`).
+
+## Verification
+
+Use the DAQ Python environment. `READTHEDOCS=1` disables HDF5's network zlock
+hook for these isolated local-file tests only; do not set it for normal BLACS.
+Integration tests refuse to operate on a non-simulated backend.
 
 ```bash
-python3 -m pytest -v python/tests/test_remote_camera.py
+READTHEDOCS=1 QT_QPA_PLATFORM=offscreen \
+AEC_TEST_HOST=127.0.0.1 AEC_TEST_CONTROL_PORT=47550 \
+AEC_TEST_DATA_PORT=47551 AEC_TEST_IPC_DIR=/tmp/aec-blacs-test \
+~/.pyenv/daq/bin/python -m pytest -q \
+    python/tests/test_labscript_remote.py python/tests/test_remote_camera.py
 ```
-
-## Settings control right
-
-The backend lets only one client change settings or start/stop
-acquisitions at a time. The worker requests this right before every
-changing operation (shown to other clients as `labscript@<ip>`). If a GUI
-holds it, the shot fails with `ControlDeniedError` naming the holder;
-release control in the GUI, or set `force_control=True` in the worker
-arguments to take it over. Reading (fetching frames, status) needs no
-control.

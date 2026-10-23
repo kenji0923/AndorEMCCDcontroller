@@ -81,6 +81,48 @@ struct TiffCloser {
 
 }  // namespace
 
+Json OrientationToJson(const DisplayOrientation& o) {
+  return Json{{"rotation_cw_deg", o.rotation_cw_deg},
+              {"flip_horizontal", o.flip_horizontal},
+              {"flip_vertical", o.flip_vertical},
+              {"tiff_orientation", TiffOrientation(o)},
+              {"order", "flip, then rotate clockwise"}};
+}
+
+DisplayOrientation OrientationFromMetadata(const Json& metadata) {
+  DisplayOrientation o;
+  if (!metadata.is_object() || !metadata.contains("display")) return o;
+  const Json& d = metadata["display"];
+  if (!d.is_object()) return o;
+  o.rotation_cw_deg = ((d.value("rotation_cw_deg", 0) % 360) + 360) % 360;
+  o.flip_horizontal = d.value("flip_horizontal", false);
+  o.flip_vertical = d.value("flip_vertical", false);
+  return o;
+}
+
+int TiffOrientation(const DisplayOrientation& o) {
+  // 2x2 matrices on (x, y) with y pointing down; the display is R^n * F.
+  struct M {
+    int a, b, c, d;  // x' = a x + b y, y' = c x + d y
+  };
+  auto mul = [](const M& p, const M& q) {
+    return M{p.a * q.a + p.b * q.c, p.a * q.b + p.b * q.d,
+             p.c * q.a + p.d * q.c, p.c * q.b + p.d * q.d};
+  };
+  M m{o.flip_horizontal ? -1 : 1, 0, 0, o.flip_vertical ? -1 : 1};
+  const M cw{0, -1, 1, 0};  // 90 degrees clockwise on screen
+  for (int k = 0; k < (o.rotation_cw_deg / 90) % 4; ++k) m = mul(cw, m);
+  // Transform a viewer applies for each Orientation value (EXIF semantics).
+  static const M kTable[8] = {{1, 0, 0, 1},  {-1, 0, 0, 1}, {-1, 0, 0, -1},
+                              {1, 0, 0, -1}, {0, 1, 1, 0},  {0, -1, 1, 0},
+                              {0, -1, -1, 0}, {0, 1, -1, 0}};
+  for (int i = 0; i < 8; ++i) {
+    const M& k = kTable[i];
+    if (k.a == m.a && k.b == m.b && k.c == m.c && k.d == m.d) return i + 1;
+  }
+  return 1;
+}
+
 bool FormatFromPath(const std::string& path, ImageFormat* format) {
   const std::string ext = Extension(path);
   if (ext == ".tif" || ext == ".tiff") {
@@ -139,6 +181,7 @@ bool WriteTiff(const std::string& path, const std::vector<Frame>& frames,
     *error = "cannot create " + path;
     return false;
   }
+  const int orientation = TiffOrientation(OrientationFromMetadata(metadata));
   for (std::size_t page = 0; page < frames.size(); ++page) {
     const Frame& f = frames[page];
     const FrameHeader& h = f.header;
@@ -157,6 +200,7 @@ bool WriteTiff(const std::string& path, const std::vector<Frame>& frames,
     TIFFSetField(t, TIFFTAG_COMPRESSION, COMPRESSION_NONE);
     TIFFSetField(t, TIFFTAG_ROWSPERSTRIP, static_cast<std::uint32_t>(h.height));
     TIFFSetField(t, TIFFTAG_SOFTWARE, "AndorEMCCDcontroller");
+    TIFFSetField(t, TIFFTAG_ORIENTATION, static_cast<std::uint16_t>(orientation));
     if (frames.size() > 1) {
       TIFFSetField(t, TIFFTAG_SUBFILETYPE, FILETYPE_PAGE);
       TIFFSetField(t, TIFFTAG_PAGENUMBER, static_cast<std::uint16_t>(page),
@@ -387,6 +431,17 @@ bool WriteFits(const std::string& path, const std::vector<Frame>& frames,
                   "UTC of first frame readout", &status);
   fits_update_key(fits, TSTRING, "INSTRUME",
                   const_cast<char*>("Andor iXon EMCCD"), nullptr, &status);
+  // Display orientation of the GUI; the data stay in readout order.
+  const DisplayOrientation o = OrientationFromMetadata(metadata);
+  int rotation = o.rotation_cw_deg;
+  int flip_h = o.flip_horizontal ? 1 : 0;
+  int flip_v = o.flip_vertical ? 1 : 0;
+  fits_update_key(fits, TINT, "DISPROT", &rotation,
+                  "display rotation clockwise [deg], after flips", &status);
+  fits_update_key(fits, TLOGICAL, "DISPFLPH", &flip_h,
+                  "display flipped horizontally", &status);
+  fits_update_key(fits, TLOGICAL, "DISPFLPV", &flip_v,
+                  "display flipped vertically", &status);
   if (!metadata.is_null()) {
     const std::string json = metadata.dump();
     // Long text goes to COMMENT cards (72 characters each).

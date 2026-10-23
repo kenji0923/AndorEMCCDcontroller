@@ -16,6 +16,7 @@
 
 #include <AndorEMCCDcontroller/CameraClient.h>
 #include <AndorEMCCDcontroller/Colormap.h>
+#include <AndorEMCCDcontroller/ImageIO.h>
 
 #include "LiveProcessor.h"
 #include <AndorEMCCDcontroller/StreamRecorder.h>
@@ -92,6 +93,7 @@ class MainWindow : public QMainWindow {
   void SaveRunFromBackend();
   void SaveFramesTo(std::vector<Frame> frames, const QString& path);
   Json SaveMetadata() const;
+  DisplayOrientation Orientation() const;
   void LoadPreferences();
   void SavePreferences() const;
 
@@ -127,6 +129,7 @@ class MainWindow : public QMainWindow {
   QCheckBox* log_scale_ = nullptr;
   QCheckBox* flip_h_ = nullptr;
   QCheckBox* flip_v_ = nullptr;
+  QComboBox* rotation_ = nullptr;  ///< Clockwise, index * 90 degrees.
   QSpinBox* arm_frames_ = nullptr;
   QSpinBox* average_frames_ = nullptr;
   QLabel* average_used_ = nullptr;
