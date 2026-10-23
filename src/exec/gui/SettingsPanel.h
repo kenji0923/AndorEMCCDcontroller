@@ -14,6 +14,7 @@
 #include <AndorEMCCDcontroller/Protocol.h>
 
 class QFormLayout;
+class QCheckBox;
 class QPushButton;
 class QVBoxLayout;
 
@@ -66,6 +67,7 @@ class SettingsPanel : public QWidget {
   void MarkChanged();
 
   QPushButton* apply_ = nullptr;
+  QCheckBox* wheel_changes_ = nullptr;
   Json info_ = Json::object();
   Json settings_ = Json::object();
   std::map<std::string, Field> fields_;

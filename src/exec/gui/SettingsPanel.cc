@@ -16,14 +16,37 @@
 #include <QHBoxLayout>
 #include <QPushButton>
 #include <QScrollArea>
+#include <QSettings>
 #include <QSpinBox>
 #include <QVBoxLayout>
+#include <QWheelEvent>
 
 namespace AndorEMCCDcontroller {
 
 namespace {
 
 const char* kChangedStyle = "background-color: #fff2b3; color: black;";
+constexpr char kWheelChangesPreference[] = "camera_settings/wheel_changes_enabled";
+
+template <typename SpinBox>
+class WheelControlledSpinBox final : public SpinBox {
+ public:
+  WheelControlledSpinBox(QCheckBox* wheel_changes, QWidget* parent)
+      : SpinBox(parent), wheel_changes_(wheel_changes) {}
+
+ protected:
+  void wheelEvent(QWheelEvent* event) override {
+    if (wheel_changes_->isChecked()) {
+      SpinBox::wheelEvent(event);
+    } else {
+      // Leave the wheel available for scrolling the surrounding settings panel.
+      event->ignore();
+    }
+  }
+
+ private:
+  QCheckBox* wheel_changes_;
+};
 
 QString Label(const std::string& s) { return QString::fromStdString(s); }
 
@@ -45,6 +68,17 @@ SettingsPanel::SettingsPanel(QWidget* parent) : QWidget(parent) { Build(); }
 void SettingsPanel::Build() {
   auto* outer = new QVBoxLayout(this);
   outer->setContentsMargins(0, 0, 0, 0);
+  wheel_changes_ = new QCheckBox(tr("Allow mouse wheel to change values"), this);
+  wheel_changes_->setObjectName("camera_settings_wheel_changes_enabled");
+  wheel_changes_->setToolTip(
+      tr("Enable wheel changes for camera numeric settings, even without "
+         "clicking the field. Arrow buttons and keyboard editing always work."));
+  wheel_changes_->setChecked(
+      QSettings().value(kWheelChangesPreference, false).toBool());
+  connect(wheel_changes_, &QCheckBox::toggled, this, [](bool enabled) {
+    QSettings().setValue(kWheelChangesPreference, enabled);
+  });
+  outer->addWidget(wheel_changes_);
   auto* scroll = new QScrollArea(this);
   scroll->setWidgetResizable(true);
   auto* content = new QWidget(scroll);
@@ -187,7 +221,7 @@ void SettingsPanel::AddField(QFormLayout* form, const std::string& key,
       break;
     }
     case Kind::kInt: {
-      auto* w = new QSpinBox(this);
+      auto* w = new WheelControlledSpinBox<QSpinBox>(wheel_changes_, this);
       w->setRange(static_cast<int>(lo),
                   static_cast<int>(std::min(hi, 2.0e9)));
       w->setKeyboardTracking(false);
@@ -196,7 +230,7 @@ void SettingsPanel::AddField(QFormLayout* form, const std::string& key,
       break;
     }
     case Kind::kDouble: {
-      auto* w = new QDoubleSpinBox(this);
+      auto* w = new WheelControlledSpinBox<QDoubleSpinBox>(wheel_changes_, this);
       w->setDecimals(decimals);
       w->setRange(lo, hi);
       w->setKeyboardTracking(false);
