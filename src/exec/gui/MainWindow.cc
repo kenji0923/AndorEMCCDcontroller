@@ -27,6 +27,8 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QMessageBox>
+#include <QMenu>
+#include <QMenuBar>
 #include <QNetworkInterface>
 #include <QUdpSocket>
 #include <QPointer>
@@ -80,6 +82,7 @@ int ExpectedEmGain(const Json& settings) {
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
   setWindowTitle(tr("iXon EMCCD controller"));
   BuildUi();
+  default_window_state_ = saveState();
   LoadPreferences();
   ReconfigureAnalysis();
   UpdateColormap();
@@ -172,6 +175,12 @@ void MainWindow::BuildUi() {
   draw_roi_action_->setCheckable(true);
   tb->addAction(tr("Fit"), view_, &ImageView::FitToWindow);
   tb->addAction(tr("1:1"), view_, &ImageView::ZoomOneToOne);
+  tb->addSeparator();
+  auto* reset_layout =
+      tb->addAction(tr("Reset layout"), this, &MainWindow::ResetWindowLayout);
+  reset_layout->setObjectName("reset_window_layout");
+  reset_layout->setToolTip(tr("Restore the default panel and toolbar layout"));
+  menuBar()->addMenu(tr("&View"))->addAction(reset_layout);
 
   // Settings dock.
   settings_panel_ = new SettingsPanel(this);
@@ -1120,6 +1129,11 @@ void MainWindow::SaveRunFromBackend() {
         },
         Qt::QueuedConnection);
   }).detach();
+}
+
+void MainWindow::ResetWindowLayout() {
+  restoreState(default_window_state_);
+  QSettings().setValue("window/state", saveState());
 }
 
 void MainWindow::LoadPreferences() {

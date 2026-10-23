@@ -10,6 +10,7 @@
 #include <memory>
 #include <vector>
 
+#include <QByteArray>
 #include <QMainWindow>
 #include <QTimer>
 #include <zmq.hpp>
@@ -96,6 +97,9 @@ class MainWindow : public QMainWindow {
   DisplayOrientation Orientation() const;
   void LoadPreferences();
   void SavePreferences() const;
+  void ResetWindowLayout();
+
+  QByteArray default_window_state_;
 
   zmq::context_t context_{1};
   std::unique_ptr<ControlClient> control_;
