@@ -23,8 +23,11 @@
 #include <AndorEMCCDcontroller/Camera.h>
 #include <AndorEMCCDcontroller/CameraSettings.h>
 #include <AndorEMCCDcontroller/FrameStore.h>
+#include <AndorEMCCDcontroller/ThermalWatch.h>
 
 namespace AndorEMCCDcontroller {
+
+class TelemetryPublisher;
 
 inline constexpr const char* kEngineEventsEndpoint = "inproc://engine-events";
 
@@ -43,6 +46,10 @@ struct EngineConfig {
   const std::atomic<bool>* abort_warmup = nullptr;
   /** A request that the engine does not finish in time fails. */
   double call_timeout_s = 60.0;
+  /** Thermal alarm: sensor this far above a set point it had reached. */
+  double cooling_lost_margin_c = 5.0;
+  /** Receives every published status (not owned); nullptr: none. */
+  TelemetryPublisher* telemetry = nullptr;
 };
 
 /**
@@ -151,6 +158,7 @@ class AcquisitionEngine {
   std::int64_t run_frames_ = 0;
   std::uint64_t next_seq_ = 0;
   TemperatureReading temperature_;
+  ThermalWatch thermal_watch_;
 
   mutable std::mutex status_mutex_;
   CameraStatus status_;

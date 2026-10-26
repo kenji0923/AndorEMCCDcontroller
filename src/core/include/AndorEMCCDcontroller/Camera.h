@@ -9,6 +9,7 @@
 #ifndef AndorEMCCDcontroller__Camera_h
 #define AndorEMCCDcontroller__Camera_h
 
+#include <limits>
 #include <memory>
 #include <string>
 #include <vector>
@@ -18,11 +19,27 @@
 
 namespace AndorEMCCDcontroller {
 
-/** Temperature reading with the SDK cooling status. */
+/**
+ * @brief Temperature reading with the SDK cooling status.
+ *
+ * temperature_c is the CCD sensor. It does not show the heat sink: when the
+ * heat sink overheats, its thermal switch cuts the TE cooler and the head
+ * beeps (iXon3 hardware guide 1.3.7) while the sensor still reads normal
+ * until it warms up. The other fields are what the SDK offers besides it;
+ * NaN or -1 when the camera does not report them.
+ */
 struct TemperatureReading {
   double temperature_c = 0.0;
   TemperatureStatus status = TemperatureStatus::kUnknown;
   bool cooler_on = false;
+  std::string error;  ///< SDK error when status is kUnknown.
+  /// "AmbientTemp" of GetTemperatureStatus: the head's cooler controller.
+  double ambient_temperature_c = std::numeric_limits<double>::quiet_NaN();
+  /// "CoolerVolts" of GetTemperatureStatus. On the DU897 it behaves like
+  /// the TE cooler supply (about 7.3 V while cooling, a little lower under
+  /// more load), not like a percentage of drive.
+  double cooler_voltage_v = std::numeric_limits<double>::quiet_NaN();
+  int tec_overheat = -1;  ///< GetTECStatus: -1 unknown, 0 normal, 1 tripped.
 };
 
 /** Geometry of the frames produced by the applied settings. */

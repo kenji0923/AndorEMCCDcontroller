@@ -45,6 +45,15 @@ class SimCamera : public Camera {
   Timings GetTimings() override;
   Json GetCalibration(double wavelength_nm) override;
 
+  /**
+   * @brief Opens or closes the simulated heat-sink thermal switch.
+   *
+   * Tripped, the TE cooler gets no power and the sensor warms up. May be
+   * called from any thread. AEC_SIM_TRIP_AT_S=<s> trips it that long after
+   * Open() for 60 s.
+   */
+  void SimulateHeatSinkTrip(bool tripped) { tripped_ = tripped; }
+
  private:
   using Clock = std::chrono::steady_clock;
   struct State;
@@ -54,6 +63,7 @@ class SimCamera : public Camera {
   double FramePeriod() const;
   Frame MakeFrame(double t);
   void UpdateTemperature();
+  double CoolerVoltage() const;
 
   std::unique_ptr<State> state_;
   CameraInfo info_;
@@ -72,11 +82,15 @@ class SimCamera : public Camera {
   std::uint64_t frame_counter_ = 0;
 
   double temperature_c_ = 20.0;
+  double head_c_ = 22.0;
   bool cooler_on_ = false;
   int target_c_ = -70;
   Clock::time_point last_temperature_update_;
   Clock::time_point stable_since_;
   bool stable_since_valid_ = false;
+  std::atomic<bool> tripped_{false};
+  double trip_at_s_ = -1.0;  ///< AEC_SIM_TRIP_AT_S; <0: never.
+  Clock::time_point opened_;
 };
 
 }  // namespace AndorEMCCDcontroller

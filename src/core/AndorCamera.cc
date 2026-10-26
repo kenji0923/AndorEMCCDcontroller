@@ -10,6 +10,8 @@
 #include <AndorEMCCDcontroller/AndorCamera.h>
 
 #include <algorithm>
+#include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <ctime>
 
@@ -18,6 +20,17 @@
 namespace AndorEMCCDcontroller {
 
 namespace {
+
+// GetTemperatureStatus reads four registers over I2C, so it runs less often
+// than the 0.5 s status poll.
+constexpr std::chrono::seconds kExtrasPeriod{2};
+
+// Values outside these ranges are decoding garbage, not readings (the
+// ambient sensor converts like an LM60, specified for -40..125 C).
+bool PlausibleAmbient(double c) { return c >= -40.0 && c <= 125.0; }
+bool PlausibleCoolerVoltage(double v) { return v >= 0.0 && v <= 20.0; }
+
+constexpr double kNaN = std::numeric_limits<double>::quiet_NaN();
 
 std::string ErrorName(unsigned int code) {
   switch (code) {
@@ -140,6 +153,7 @@ bool AndorCamera::Open(std::string* error) {
   }
   open_ = true;
   QueryInfo();
+  ProbeThermalReadouts();
   return true;
 }
 
@@ -274,6 +288,74 @@ void AndorCamera::QueryInfo() {
   }
   if (info.trigger_modes.empty()) info.trigger_modes = TriggerModeNames();
   info.acquisition_modes = AcquisitionModeNames();
+}
+
+void AndorCamera::ProbeThermalReadouts() {
+  // The SDK has no heat-sink trip flag for the iXon: SDK 2.103 answers
+  // GetTECStatus (and GetFrontEndStatus) only for the iVac, so it returns
+  // DRV_NOT_SUPPORTED here; it is probed in case another camera has it.
+  // GetTemperatureStatus is "reserved" in the manual. On iXon cameras with
+  // the 8-bit cooler controller it reads the controller's ambient and
+  // cooler-voltage registers (I2C reads only); on others it leaves both 0.
+  char text[256];
+  float sensor = 0.0f;
+  float target = 0.0f;
+  float ambient = 0.0f;
+  float volts = 0.0f;
+  const unsigned int rc =
+      GetTemperatureStatus(&sensor, &target, &ambient, &volts);
+  std::string probe;
+  if (rc == DRV_SUCCESS) {
+    // An exact 0 ambient is the "not read" value (the 8-bit conversion
+    // cannot produce it).
+    const bool extras = ambient != 0.0f;
+    info_.has_ambient_temperature = extras && PlausibleAmbient(ambient);
+    info_.has_cooler_voltage = extras && PlausibleCoolerVoltage(volts);
+    std::snprintf(text, sizeof(text),
+                  "GetTemperatureStatus: sensor %.2f C, target %.2f C, "
+                  "ambient %.2f C, cooler %.2f V",
+                  sensor, target, ambient, volts);
+    probe = text;
+  } else {
+    probe = "GetTemperatureStatus: " + ErrorName(rc);
+  }
+  int tec = -1;
+  const unsigned int tec_rc = GetTECStatus(&tec);
+  info_.has_tec_status = tec_rc == DRV_SUCCESS;
+  probe += "; GetTECStatus: " +
+           (tec_rc == DRV_SUCCESS ? std::to_string(tec) : ErrorName(tec_rc));
+  info_.thermal_probe = probe;
+}
+
+void AndorCamera::ReadThermalExtras(TemperatureReading* r) {
+  const auto now = std::chrono::steady_clock::now();
+  if (now >= next_extras_) {
+    next_extras_ = now + kExtrasPeriod;
+    if (info_.has_ambient_temperature || info_.has_cooler_voltage) {
+      float sensor = 0.0f;
+      float target = 0.0f;
+      float ambient = 0.0f;
+      float volts = 0.0f;
+      const bool ok = GetTemperatureStatus(&sensor, &target, &ambient,
+                                           &volts) == DRV_SUCCESS;
+      ambient_c_ = ok && info_.has_ambient_temperature &&
+                           PlausibleAmbient(ambient)
+                       ? ambient
+                       : kNaN;
+      cooler_voltage_v_ = ok && info_.has_cooler_voltage &&
+                                  PlausibleCoolerVoltage(volts)
+                              ? volts
+                              : kNaN;
+    }
+    if (info_.has_tec_status) {
+      // DRV_ACQUIRING during a run: unknown rather than a stale "normal".
+      int tec = -1;
+      tec_overheat_ = GetTECStatus(&tec) == DRV_SUCCESS ? tec : -1;
+    }
+  }
+  r->ambient_temperature_c = ambient_c_;
+  r->cooler_voltage_v = cooler_voltage_v_;
+  r->tec_overheat = tec_overheat_;
 }
 
 CameraInfo AndorCamera::Info() const { return info_; }
@@ -686,6 +768,8 @@ TemperatureReading AndorCamera::ReadTemperature() {
     // reading but mark it unknown.
     TemperatureReading r = last_temperature_;
     r.status = TemperatureStatus::kUnknown;
+    r.error = "GetTemperatureF: " + ErrorName(rc);
+    ReadThermalExtras(&r);
     return r;
   }
   TemperatureReading r;
@@ -693,6 +777,7 @@ TemperatureReading AndorCamera::ReadTemperature() {
   r.status = status;
   int on = 0;
   r.cooler_on = IsCoolerOn(&on) == DRV_SUCCESS ? on != 0 : cooler_on_;
+  ReadThermalExtras(&r);
   last_temperature_ = r;
   return r;
 }

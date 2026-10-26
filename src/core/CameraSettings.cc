@@ -6,6 +6,7 @@
 #include <AndorEMCCDcontroller/CameraSettings.h>
 
 #include <algorithm>
+#include <cmath>
 #include <functional>
 #include <map>
 #include <utility>
@@ -220,6 +221,18 @@ std::string ToString(CameraState v) {
   return "unknown";
 }
 
+std::string ToString(ThermalAlarm v) {
+  switch (v) {
+    case ThermalAlarm::kOk:
+      return "ok";
+    case ThermalAlarm::kWarning:
+      return "warning";
+    case ThermalAlarm::kAlarm:
+      return "alarm";
+  }
+  return "unknown";
+}
+
 const std::vector<std::string>& AcquisitionModeNames() {
   static const auto names = AcquisitionModes().Names();
   return names;
@@ -343,7 +356,11 @@ void to_json(Json& j, const CameraInfo& info) {
            {"has_isolated_crop", info.has_isolated_crop},
            {"has_count_convert", info.has_count_convert},
            {"has_metadata", info.has_metadata},
-           {"has_frame_transfer", info.has_frame_transfer}};
+           {"has_frame_transfer", info.has_frame_transfer},
+           {"has_ambient_temperature", info.has_ambient_temperature},
+           {"has_cooler_voltage", info.has_cooler_voltage},
+           {"has_tec_status", info.has_tec_status},
+           {"thermal_probe", info.thermal_probe}};
 }
 
 void to_json(Json& j, const Timings& t) {
@@ -362,10 +379,23 @@ void to_json(Json& j, const ControlInfo& c) {
 }
 
 void to_json(Json& j, const CameraStatus& s) {
+  // Readouts the camera does not provide are null.
+  const auto or_null = [](double v) {
+    return std::isnan(v) ? Json() : Json(v);
+  };
   j = Json{{"state", ToString(s.state)},
            {"temperature_c", s.temperature_c},
            {"temperature_status", ToString(s.temperature_status)},
            {"cooler_on", s.cooler_on},
+           {"target_temperature_c", s.target_temperature_c},
+           {"fan_mode", ToString(s.fan_mode)},
+           {"ambient_temperature_c", or_null(s.ambient_temperature_c)},
+           {"cooler_voltage_v", or_null(s.cooler_voltage_v)},
+           {"tec_overheat",
+            s.tec_overheat < 0 ? Json() : Json(s.tec_overheat != 0)},
+           {"thermal_alarm", ToString(s.thermal_alarm)},
+           {"thermal_alarm_reason", s.thermal_alarm_reason},
+           {"thermal_alarm_count", s.thermal_alarm_count},
            {"run_id", s.run_id},
            {"run_mode", s.run_mode},
            {"frames_in_run", s.frames_in_run},

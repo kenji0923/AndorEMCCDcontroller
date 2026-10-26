@@ -15,6 +15,16 @@
   "warmup_on_exit": true,
   "warmup_target_c": -20,
   "warmup_timeout_s": 900,
+  "cooling_lost_margin_c": 5,              // thermal alarm: sensor this far above a reached set point
+  // Status to Telegraf (InfluxDB line protocol over HTTP); off while url is "".
+  // Lab example: "url": "http://192.168.1.5:8080/telegraf" with the tags below.
+  "telemetry": {
+    "url": "",
+    "interval_s": 5,
+    "timeout_s": 3,
+    "measurement": "andor_emccd",          // VictoriaMetrics: andor_emccd_<field>
+    "tags": {"tlg_bucket": "laserlab", "site": "laserlab", "device": "emccd"}
+  },
   // Applied at start, before the persisted settings_file.
   "initial_settings": {
     "cooler_on": true,
