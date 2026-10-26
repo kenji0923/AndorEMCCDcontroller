@@ -697,6 +697,18 @@ void MainWindow::ApplySettings(const Json& patch) {
   statusBar()->showMessage(warnings.isEmpty() ? tr("Settings applied")
                                               : tr("Applied with warnings"),
                            5000);
+  const int requested_conversion = patch.value("count_convert_mode", 0);
+  if (requested_conversion != 0 &&
+      settings_.value("count_convert_mode", 0) != requested_conversion) {
+    QMessageBox::warning(
+        this, tr("Count conversion unavailable"),
+        tr("The camera SDK did not accept %1 conversion and kept Counts.\n\n"
+           "For iXon, check baseline clamp, isolated crop off, EM gain of at "
+           "least 10, a preamp gain above the lowest setting, and a supported "
+           "readout.\n\n%2")
+            .arg(requested_conversion == 2 ? tr("Photons") : tr("Electrons"),
+                 warnings.join('\n')));
+  }
 }
 
 void MainWindow::StartLive() {

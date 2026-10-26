@@ -140,7 +140,12 @@ void SettingsPanel::Build() {
            Kind::kChoice);
   AddField(readout, "preamp_gain_index", tr("Pre-amp gain"), Kind::kChoice);
   AddField(readout, "baseline_clamp", tr("Baseline clamp"), Kind::kBool);
-  AddField(readout, "count_convert_mode", tr("Count convert"), Kind::kChoice);
+  AddField(readout, "count_convert_mode", tr("Count convert"), Kind::kChoice,
+           0, 0, 1, 0,
+           tr("Converts acquired and saved pixel values through the camera SDK. "
+              "On iXon, conversion requires baseline clamp, isolated crop off, "
+              "EM gain of at least 10, a preamp gain above the lowest setting, "
+              "and a supported readout. Photons also uses Wavelength (nm)."));
   AddField(readout, "count_convert_wavelength_nm", tr("Wavelength (nm)"),
            Kind::kDouble, 100, 2000, 1, 1);
 
