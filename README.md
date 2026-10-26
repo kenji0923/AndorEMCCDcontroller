@@ -13,7 +13,7 @@ Andor iXon3 EMCCD（DU-897E-CS0-#BV、CCI-24 PCI カード）用のコントロ�
 ```
 src/            C++17 / CMake のソース（core: 共通ライブラリ、exec: backend と gui、test: GoogleTest）
 python/         Python クライアント、labscript デバイス、試験スクリプト（bench/）
-deploy/         バックエンドの systemd ユニット（システム / ユーザー）、インストーラ、udev ルール、設定例
+deploy/         バックエンドの systemd ユニット（システム / ユーザー）、インストーラ、udev ルール、設定例、Grafana ダッシュボード（grafana/）
 tools/          Windows ビルドスクリプト、カメラ PC の準備スクリプト（camera_pc/）、補助スクリプト
 doc/            説明書（HTML）
 ```

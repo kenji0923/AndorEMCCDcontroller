@@ -27,6 +27,10 @@ using Clock = std::chrono::steady_clock;
 constexpr int kSensorWidth = 512;
 constexpr int kSensorHeight = 512;
 constexpr double kAmbientC = 20.0;
+constexpr double kHeadIdleC = 22.0;      ///< Head with the cooler off.
+constexpr double kHeadTrippedC = 55.0;   ///< Heat sink hot enough to trip.
+constexpr double kTripDurationS = 60.0;  ///< AEC_SIM_TRIP_AT_S trips this long.
+constexpr double kStableAfterS = 10.0;   ///< Within 2 C this long: stabilized.
 constexpr std::size_t kNoiseTableSize = 1u << 20;
 
 double Seconds(Clock::duration d) {
@@ -72,9 +76,15 @@ SimCamera::SimCamera() : state_(std::make_unique<State>()) {
   info_.has_count_convert = true;
   info_.has_metadata = true;
   info_.has_frame_transfer = true;
+  info_.has_ambient_temperature = true;
+  info_.has_cooler_voltage = true;
+  info_.thermal_probe = "simulated ambient temperature and cooler voltage";
 
   if (const char* hz = std::getenv("AEC_SIM_TRIGGER_HZ")) {
     trigger_hz_ = std::max(0.01, std::atof(hz));
+  }
+  if (const char* at = std::getenv("AEC_SIM_TRIP_AT_S")) {
+    trip_at_s_ = std::max(0.0, std::atof(at));
   }
 
   std::mt19937 rng(12345);
@@ -89,7 +99,10 @@ SimCamera::SimCamera() : state_(std::make_unique<State>()) {
 
 SimCamera::~SimCamera() = default;
 
-bool SimCamera::Open(std::string* /*error*/) { return true; }
+bool SimCamera::Open(std::string* /*error*/) {
+  opened_ = Clock::now();
+  return true;
+}
 
 void SimCamera::Close() { acquiring_ = false; }
 
@@ -402,16 +415,30 @@ bool SimCamera::SendSoftwareTrigger(std::string* error) {
   return true;
 }
 
+double SimCamera::CoolerVoltage() const {
+  if (!cooler_on_ || tripped_) return 0.0;
+  // Deeper set points need more drive; the controller saturates at 7.5 V.
+  return std::clamp(1.5 + 0.06 * (kAmbientC - target_c_), 0.0, 7.5);
+}
+
 void SimCamera::UpdateTemperature() {
   const auto now = Clock::now();
+  if (trip_at_s_ >= 0.0) {
+    const double since_trip = Seconds(now - opened_) - trip_at_s_;
+    tripped_ = since_trip >= 0.0 && since_trip < kTripDurationS;
+  }
   const double dt = Seconds(now - last_temperature_update_);
   last_temperature_update_ = now;
-  const double goal = cooler_on_ ? target_c_ : kAmbientC;
+  const double goal = cooler_on_ && !tripped_ ? target_c_ : kAmbientC;
   const double tau = 15.0;
   // Cooling power is finite: at most 2 K/s.
   double step = (goal - temperature_c_) * (1.0 - std::exp(-dt / tau));
   step = std::clamp(step, -2.0 * dt, 2.0 * dt);
   temperature_c_ += step;
+  // The TE cooler heats the head in proportion to its drive.
+  const double head_goal =
+      tripped_ ? kHeadTrippedC : kHeadIdleC + 1.2 * CoolerVoltage();
+  head_c_ += (head_goal - head_c_) * (1.0 - std::exp(-dt / tau));
 }
 
 TemperatureReading SimCamera::ReadTemperature() {
@@ -419,6 +446,8 @@ TemperatureReading SimCamera::ReadTemperature() {
   TemperatureReading r;
   r.temperature_c = std::round(temperature_c_ * 100.0) / 100.0;
   r.cooler_on = cooler_on_;
+  r.ambient_temperature_c = std::round(head_c_ * 100.0) / 100.0;
+  r.cooler_voltage_v = CoolerVoltage();
   if (!cooler_on_) {
     r.status = TemperatureStatus::kOff;
     return r;
@@ -426,14 +455,18 @@ TemperatureReading SimCamera::ReadTemperature() {
   const double error = std::abs(temperature_c_ - target_c_);
   const auto now = Clock::now();
   if (error > 2.0) {
-    stable_since_valid_ = false;
-    r.status = TemperatureStatus::kNotReached;
+    // Leaving the set point after stabilizing is a drift, as in the SDK.
+    r.status = stable_since_valid_ &&
+                       Seconds(now - stable_since_) > kStableAfterS
+                   ? TemperatureStatus::kDrift
+                   : TemperatureStatus::kNotReached;
+    if (r.status != TemperatureStatus::kDrift) stable_since_valid_ = false;
   } else {
     if (!stable_since_valid_) {
       stable_since_valid_ = true;
       stable_since_ = now;
     }
-    r.status = Seconds(now - stable_since_) > 10.0
+    r.status = Seconds(now - stable_since_) > kStableAfterS
                    ? TemperatureStatus::kStabilized
                    : TemperatureStatus::kNotStabilized;
   }

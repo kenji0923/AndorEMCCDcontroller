@@ -21,6 +21,9 @@ if(AEC_BUILD_GUI)
 endif()
 
 if(AEC_BUILD_BACKEND)
+    aec_add_test(test_telemetry test_telemetry.cc)
+    target_link_libraries(test_telemetry PRIVATE AndorEMCCDcontroller::Engine)
+
     aec_add_test(test_backend test_backend.cc)
     target_link_libraries(test_backend PRIVATE AndorEMCCDcontroller::Engine)
     if(AEC_BUILD_GUI)

@@ -1,0 +1,1791 @@
+{
+  "title": "Andor iXon3 EMCCD - cooling & TEC",
+  "uid": "andor-emccd-cooling",
+  "description": "Cooling health of the Andor iXon3 EMCCD (andor_emccd_backend telemetry via Telegraf → VictoriaMetrics).",
+  "tags": [
+    "laserlab",
+    "emccd",
+    "andor"
+  ],
+  "timezone": "browser",
+  "refresh": "10s",
+  "graphTooltip": 1,
+  "editable": true,
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "schemaVersion": 39,
+  "version": 4,
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "label": "Data source",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {
+          "selected": true,
+          "text": "victoria-metrics",
+          "value": "dfdmpri8s8miob"
+        },
+        "hide": 0,
+        "refresh": 1,
+        "regex": "",
+        "includeAll": false,
+        "multi": false
+      },
+      {
+        "name": "host",
+        "label": "Host",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "query": {
+          "query": "label_values(andor_emccd_state{db=\"laserlab\"}, host)",
+          "refId": "host"
+        },
+        "definition": "label_values(andor_emccd_state{db=\"laserlab\"}, host)",
+        "current": {},
+        "refresh": 2,
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": false,
+        "sort": 1,
+        "hide": 0
+      },
+      {
+        "name": "device",
+        "label": "Camera",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "query": {
+          "query": "label_values(andor_emccd_state{db=\"laserlab\",host=~\"$host\"}, device)",
+          "refId": "device"
+        },
+        "definition": "label_values(andor_emccd_state{db=\"laserlab\",host=~\"$host\"}, device)",
+        "current": {},
+        "refresh": 2,
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": false,
+        "sort": 1,
+        "hide": 0
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Thermal alarm",
+      "description": "Backend verdict. ALARM: cooler on, the sensor had reached the set point and is now more than cooling_lost_margin_c (5 °C) above it — typical of the heat-sink thermal switch cutting the TE cooler. WARNING: SDK reports DRIFT, or the sensor temperature cannot be read.",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(andor_emccd_thermal_alarm{db=\"laserlab\",host=~\"$host\",device=~\"$device\"})",
+          "instant": true,
+          "range": false,
+          "legendFormat": "{{device}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 2
+              }
+            ]
+          },
+          "noValue": "no data",
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "OK",
+                  "color": "green",
+                  "index": 0
+                },
+                "1": {
+                  "text": "WARNING",
+                  "color": "orange",
+                  "index": 1
+                },
+                "2": {
+                  "text": "ALARM",
+                  "color": "red",
+                  "index": 2
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "wideLayout": true,
+        "showPercentChange": false
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 4,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "id": 1
+    },
+    {
+      "type": "stat",
+      "title": "Sensor − set point",
+      "description": "CCD sensor temperature minus the set point. The SDK calls it stabilized within ±3 °C; the backend raises ALARM above +5 °C (after the set point had been reached).",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(andor_emccd_sensor_temperature_c{db=\"laserlab\",host=~\"$host\",device=~\"$device\"} - andor_emccd_target_temperature_c{db=\"laserlab\",host=~\"$host\",device=~\"$device\"})",
+          "instant": true,
+          "range": false,
+          "legendFormat": "{{device}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 3
+              },
+              {
+                "color": "red",
+                "value": 5
+              }
+            ]
+          },
+          "noValue": "no data",
+          "unit": "celsius",
+          "decimals": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "wideLayout": true,
+        "showPercentChange": false
+      },
+      "gridPos": {
+        "x": 4,
+        "y": 0,
+        "w": 4,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "id": 2
+    },
+    {
+      "type": "stat",
+      "title": "TEC voltage",
+      "description": "SDK GetTemperatureStatus 'CoolerVolts' (8-bit, 0.03 V steps). On this camera it stays about 7.3 V while cooling (-80 and -75 °C alike) and jumped to 7.5 V for a moment when the set point was raised, so it looks like the TEC supply voltage sagging under load, not a percentage of drive. Watch for a sudden change (towards 0 V, or a steady ~7.5 V) while the cooler is ON. 'no data': the camera does not report it.",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(andor_emccd_cooler_voltage_v{db=\"laserlab\",host=~\"$host\",device=~\"$device\"})",
+          "instant": true,
+          "range": false,
+          "legendFormat": "{{device}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          },
+          "noValue": "no data",
+          "unit": "volt",
+          "decimals": 2
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "wideLayout": true,
+        "showPercentChange": false
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 0,
+        "w": 4,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "id": 3
+    },
+    {
+      "type": "stat",
+      "title": "Camera head (TEC controller) temp.",
+      "description": "Temperature at the cooler controller inside the camera head (SDK GetTemperatureStatus 'AmbientTemp'). Not the CCD sensor. Rises when the heat sink is not cooled (chiller off, low flow, fan off). Observed 2026-10-23 with water cooling: ~42 °C at -80 °C, ~39 °C at -75 °C (8-bit, 1.6 °C steps); it follows the cooler load within a minute. Colour thresholds (45/50 °C) are provisional: adjust them with more history.",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(andor_emccd_ambient_temperature_c{db=\"laserlab\",host=~\"$host\",device=~\"$device\"})",
+          "instant": true,
+          "range": false,
+          "legendFormat": "{{device}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 45
+              },
+              {
+                "color": "red",
+                "value": 50
+              }
+            ]
+          },
+          "noValue": "no data",
+          "unit": "celsius",
+          "decimals": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "wideLayout": true,
+        "showPercentChange": false
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 4,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "id": 4
+    },
+    {
+      "type": "stat",
+      "title": "Worst level in time range",
+      "description": "Highest thermal alarm level anywhere in the selected time range: did anything happen while nobody was looking?",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(max_over_time(andor_emccd_thermal_alarm{db=\"laserlab\",host=~\"$host\",device=~\"$device\"}[$__range]))",
+          "instant": true,
+          "range": false,
+          "legendFormat": "{{device}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 2
+              }
+            ]
+          },
+          "noValue": "no data",
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "OK",
+                  "color": "green",
+                  "index": 0
+                },
+                "1": {
+                  "text": "WARNING",
+                  "color": "orange",
+                  "index": 1
+                },
+                "2": {
+                  "text": "ALARM",
+                  "color": "red",
+                  "index": 2
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "wideLayout": true,
+        "showPercentChange": false
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 0,
+        "w": 4,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "id": 5
+    },
+    {
+      "type": "stat",
+      "title": "Last report",
+      "description": "Seconds since the backend last reported (it sends every 5 s). 'no data' for minutes: backend or Telegraf down.",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "time() - max(timestamp(andor_emccd_state{db=\"laserlab\",host=~\"$host\",device=~\"$device\"}))",
+          "instant": true,
+          "range": false,
+          "legendFormat": "{{device}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 30
+              },
+              {
+                "color": "red",
+                "value": 60
+              }
+            ]
+          },
+          "noValue": "NO DATA — backend down?",
+          "unit": "s",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "wideLayout": true,
+        "showPercentChange": false
+      },
+      "gridPos": {
+        "x": 20,
+        "y": 0,
+        "w": 4,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "id": 6
+    },
+    {
+      "type": "stat",
+      "title": "Sensor (CCD) temperature",
+      "description": "CCD sensor temperature (SDK GetTemperatureF). This is what the GUI shows; it stays normal for a while after the heat-sink switch trips.",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(andor_emccd_sensor_temperature_c{db=\"laserlab\",host=~\"$host\",device=~\"$device\"})",
+          "instant": true,
+          "range": false,
+          "legendFormat": "{{device}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          },
+          "noValue": "no data",
+          "unit": "celsius",
+          "decimals": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "wideLayout": true,
+        "showPercentChange": false
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 4,
+        "w": 4,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "id": 7
+    },
+    {
+      "type": "stat",
+      "title": "Set point",
+      "description": "Target temperature of the cooler.",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(andor_emccd_target_temperature_c{db=\"laserlab\",host=~\"$host\",device=~\"$device\"})",
+          "instant": true,
+          "range": false,
+          "legendFormat": "{{device}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          },
+          "noValue": "no data",
+          "unit": "celsius",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "wideLayout": true,
+        "showPercentChange": false
+      },
+      "gridPos": {
+        "x": 4,
+        "y": 4,
+        "w": 4,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "id": 8
+    },
+    {
+      "type": "stat",
+      "title": "Cooler switch (SDK)",
+      "description": "Whether the cooler is switched on in software (SDK IsCoolerOn). It stays ON when the heat-sink thermal switch cuts the TEC, so it does NOT show the alarm; use Thermal alarm, Sensor − set point, TEC voltage and the head temperature.",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(andor_emccd_cooler_on{db=\"laserlab\",host=~\"$host\",device=~\"$device\"})",
+          "instant": true,
+          "range": false,
+          "legendFormat": "{{device}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          },
+          "noValue": "no data",
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "OFF",
+                  "color": "text",
+                  "index": 0
+                },
+                "1": {
+                  "text": "ON",
+                  "color": "blue",
+                  "index": 1
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "wideLayout": true,
+        "showPercentChange": false
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 4,
+        "w": 3,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "id": 9
+    },
+    {
+      "type": "stat",
+      "title": "SDK temperature status",
+      "description": "Status code returned with the sensor temperature by GetTemperatureF.",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(andor_emccd_temperature_status{db=\"laserlab\",host=~\"$host\",device=~\"$device\"})",
+          "instant": true,
+          "range": false,
+          "legendFormat": "{{device}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          },
+          "noValue": "no data",
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "cooler off",
+                  "color": "text",
+                  "index": 0
+                },
+                "1": {
+                  "text": "not reached",
+                  "color": "orange",
+                  "index": 1
+                },
+                "2": {
+                  "text": "not stabilized",
+                  "color": "yellow",
+                  "index": 2
+                },
+                "3": {
+                  "text": "stabilized",
+                  "color": "green",
+                  "index": 3
+                },
+                "4": {
+                  "text": "DRIFT",
+                  "color": "red",
+                  "index": 4
+                },
+                "5": {
+                  "text": "unreadable",
+                  "color": "purple",
+                  "index": 5
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "wideLayout": true,
+        "showPercentChange": false
+      },
+      "gridPos": {
+        "x": 11,
+        "y": 4,
+        "w": 4,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "id": 10
+    },
+    {
+      "type": "stat",
+      "title": "Fan",
+      "description": "Fan setting (SetFanMode). 'off'/'low' only with working water cooling.",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(andor_emccd_fan_mode{db=\"laserlab\",host=~\"$host\",device=~\"$device\"})",
+          "instant": true,
+          "range": false,
+          "legendFormat": "{{device}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          },
+          "noValue": "no data",
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "full",
+                  "color": "green",
+                  "index": 0
+                },
+                "1": {
+                  "text": "low",
+                  "color": "orange",
+                  "index": 1
+                },
+                "2": {
+                  "text": "off",
+                  "color": "orange",
+                  "index": 2
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "wideLayout": true,
+        "showPercentChange": false
+      },
+      "gridPos": {
+        "x": 15,
+        "y": 4,
+        "w": 3,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "id": 11
+    },
+    {
+      "type": "stat",
+      "title": "Camera",
+      "description": "Backend camera state.",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(andor_emccd_state{db=\"laserlab\",host=~\"$host\",device=~\"$device\"})",
+          "instant": true,
+          "range": false,
+          "legendFormat": "{{device}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          },
+          "noValue": "no data",
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "idle",
+                  "color": "green",
+                  "index": 0
+                },
+                "1": {
+                  "text": "acquiring",
+                  "color": "blue",
+                  "index": 1
+                },
+                "2": {
+                  "text": "error",
+                  "color": "red",
+                  "index": 2
+                },
+                "3": {
+                  "text": "disconnected",
+                  "color": "red",
+                  "index": 3
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "wideLayout": true,
+        "showPercentChange": false
+      },
+      "gridPos": {
+        "x": 18,
+        "y": 4,
+        "w": 3,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "id": 12
+    },
+    {
+      "type": "stat",
+      "title": "Alarm episodes in range",
+      "description": "How many times the ALARM level was entered in the selected time range (counted by the backend at 2 Hz, so short episodes between 5 s samples are not missed).",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(increase(andor_emccd_thermal_alarm_count{db=\"laserlab\",host=~\"$host\",device=~\"$device\"}[$__range]))",
+          "instant": true,
+          "range": false,
+          "legendFormat": "{{device}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "noValue": "no data",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "wideLayout": true,
+        "showPercentChange": false
+      },
+      "gridPos": {
+        "x": 21,
+        "y": 4,
+        "w": 3,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "id": 13
+    },
+    {
+      "type": "timeseries",
+      "title": "Sensor (CCD) temperature and set point",
+      "description": "CCD sensor temperature with the set point (dashed).",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "andor_emccd_sensor_temperature_c{db=\"laserlab\",host=~\"$host\",device=~\"$device\"}",
+          "range": true,
+          "instant": false,
+          "legendFormat": "sensor {{device}}"
+        },
+        {
+          "refId": "B",
+          "expr": "andor_emccd_target_temperature_c{db=\"laserlab\",host=~\"$host\",device=~\"$device\"}",
+          "range": true,
+          "instant": false,
+          "legendFormat": "set point {{device}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "celsius",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 0,
+            "showPoints": "never",
+            "spanNulls": 60000,
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "color": {
+            "mode": "palette-classic"
+          },
+          "decimals": 1
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "B"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "gray"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 12,
+        "h": 9
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "id": 14
+    },
+    {
+      "type": "timeseries",
+      "title": "Sensor − set point",
+      "description": "Deviation from the set point. Orange: outside the SDK's ±3 °C stabilization band; red: backend ALARM threshold (+5 °C).",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "andor_emccd_sensor_temperature_c{db=\"laserlab\",host=~\"$host\",device=~\"$device\"} - andor_emccd_target_temperature_c{db=\"laserlab\",host=~\"$host\",device=~\"$device\"}",
+          "range": true,
+          "instant": false,
+          "legendFormat": "{{device}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "celsius",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 0,
+            "showPoints": "never",
+            "spanNulls": 60000,
+            "thresholdsStyle": {
+              "mode": "line+area"
+            }
+          },
+          "color": {
+            "mode": "palette-classic"
+          },
+          "decimals": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "transparent",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 3
+              },
+              {
+                "color": "red",
+                "value": 5
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 8,
+        "w": 12,
+        "h": 9
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "id": 15
+    },
+    {
+      "type": "timeseries",
+      "title": "Camera head (TEC controller) temperature",
+      "description": "SDK GetTemperatureStatus 'AmbientTemp' — temperature at the cooler controller in the head, not the CCD. Watch for a rise: the heat sink is not being cooled.",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "andor_emccd_ambient_temperature_c{db=\"laserlab\",host=~\"$host\",device=~\"$device\"}",
+          "range": true,
+          "instant": false,
+          "legendFormat": "head {{device}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "celsius",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 0,
+            "showPoints": "never",
+            "spanNulls": 60000,
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "color": {
+            "mode": "palette-classic"
+          },
+          "decimals": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 17,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "id": 16
+    },
+    {
+      "type": "timeseries",
+      "title": "TEC voltage",
+      "description": "SDK GetTemperatureStatus 'CoolerVolts' (see the stat above): about 7.3 V while cooling. A sudden change while the cooler is ON (towards 0 V, or a steady ~7.5 V) suggests the TEC lost power.",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "andor_emccd_cooler_voltage_v{db=\"laserlab\",host=~\"$host\",device=~\"$device\"}",
+          "range": true,
+          "instant": false,
+          "legendFormat": "TEC {{device}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "volt",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 0,
+            "showPoints": "never",
+            "spanNulls": 60000,
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "color": {
+            "mode": "palette-classic"
+          },
+          "decimals": 2
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 17,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "id": 17
+    },
+    {
+      "type": "timeseries",
+      "title": "Cooler ON (1) / thermal alarm (0 OK, 1 WARNING, 2 ALARM)",
+      "description": "History of the cooler switch (SDK flag, 1 = ON; the thermal switch does not change it) and of the backend's thermal verdict (2 = ALARM: sensor more than 5 °C above a set point it had reached).",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(andor_emccd_cooler_on{db=\"laserlab\",host=~\"$host\",device=~\"$device\"})",
+          "range": true,
+          "instant": false,
+          "legendFormat": "cooler on"
+        },
+        {
+          "refId": "B",
+          "expr": "max(andor_emccd_thermal_alarm{db=\"laserlab\",host=~\"$host\",device=~\"$device\"})",
+          "range": true,
+          "instant": false,
+          "legendFormat": "thermal alarm"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": 60000,
+            "thresholdsStyle": {
+              "mode": "off"
+            },
+            "lineInterpolation": "stepAfter"
+          },
+          "color": {
+            "mode": "palette-classic"
+          },
+          "decimals": 0,
+          "min": 0,
+          "max": 2
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "A"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "blue"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "B"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 25,
+        "w": 24,
+        "h": 6
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "id": 18
+    },
+    {
+      "type": "state-timeline",
+      "title": "Cooling state timeline",
+      "description": "Backend thermal verdict, SDK status, cooler, fan and camera state over time.",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(andor_emccd_thermal_alarm{db=\"laserlab\",host=~\"$host\",device=~\"$device\"})",
+          "range": true,
+          "instant": false,
+          "legendFormat": "thermal alarm"
+        },
+        {
+          "refId": "B",
+          "expr": "max(andor_emccd_temperature_status{db=\"laserlab\",host=~\"$host\",device=~\"$device\"})",
+          "range": true,
+          "instant": false,
+          "legendFormat": "SDK temperature status"
+        },
+        {
+          "refId": "C",
+          "expr": "max(andor_emccd_cooler_on{db=\"laserlab\",host=~\"$host\",device=~\"$device\"})",
+          "range": true,
+          "instant": false,
+          "legendFormat": "cooler"
+        },
+        {
+          "refId": "D",
+          "expr": "max(andor_emccd_fan_mode{db=\"laserlab\",host=~\"$host\",device=~\"$device\"})",
+          "range": true,
+          "instant": false,
+          "legendFormat": "fan"
+        },
+        {
+          "refId": "E",
+          "expr": "max(andor_emccd_state{db=\"laserlab\",host=~\"$host\",device=~\"$device\"})",
+          "range": true,
+          "instant": false,
+          "legendFormat": "camera"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 85,
+            "lineWidth": 0
+          },
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "A"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "0": {
+                        "text": "OK",
+                        "color": "green",
+                        "index": 0
+                      },
+                      "1": {
+                        "text": "WARNING",
+                        "color": "orange",
+                        "index": 1
+                      },
+                      "2": {
+                        "text": "ALARM",
+                        "color": "red",
+                        "index": 2
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "B"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "0": {
+                        "text": "cooler off",
+                        "color": "text",
+                        "index": 0
+                      },
+                      "1": {
+                        "text": "not reached",
+                        "color": "orange",
+                        "index": 1
+                      },
+                      "2": {
+                        "text": "not stabilized",
+                        "color": "yellow",
+                        "index": 2
+                      },
+                      "3": {
+                        "text": "stabilized",
+                        "color": "green",
+                        "index": 3
+                      },
+                      "4": {
+                        "text": "DRIFT",
+                        "color": "red",
+                        "index": 4
+                      },
+                      "5": {
+                        "text": "unreadable",
+                        "color": "purple",
+                        "index": 5
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "C"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "0": {
+                        "text": "OFF",
+                        "color": "text",
+                        "index": 0
+                      },
+                      "1": {
+                        "text": "ON",
+                        "color": "blue",
+                        "index": 1
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "D"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "0": {
+                        "text": "full",
+                        "color": "green",
+                        "index": 0
+                      },
+                      "1": {
+                        "text": "low",
+                        "color": "orange",
+                        "index": 1
+                      },
+                      "2": {
+                        "text": "off",
+                        "color": "orange",
+                        "index": 2
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "E"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "0": {
+                        "text": "idle",
+                        "color": "green",
+                        "index": 0
+                      },
+                      "1": {
+                        "text": "acquiring",
+                        "color": "blue",
+                        "index": 1
+                      },
+                      "2": {
+                        "text": "error",
+                        "color": "red",
+                        "index": 2
+                      },
+                      "3": {
+                        "text": "disconnected",
+                        "color": "red",
+                        "index": 3
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showValue": "auto",
+        "mergeValues": true,
+        "rowHeight": 0.85,
+        "alignValue": "left",
+        "legend": {
+          "showLegend": false
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 31,
+        "w": 24,
+        "h": 7
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "id": 19
+    },
+    {
+      "type": "timeseries",
+      "title": "EM gain and frame rate",
+      "description": "Effective EM gain (0 = off/conventional amplifier) and acquisition frame rate, for context.",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "andor_emccd_em_gain{db=\"laserlab\",host=~\"$host\",device=~\"$device\"}",
+          "range": true,
+          "instant": false,
+          "legendFormat": "EM gain {{device}}"
+        },
+        {
+          "refId": "B",
+          "expr": "andor_emccd_fps{db=\"laserlab\",host=~\"$host\",device=~\"$device\"}",
+          "range": true,
+          "instant": false,
+          "legendFormat": "frame rate {{device}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 0,
+            "showPoints": "never",
+            "spanNulls": 60000,
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "B"
+            },
+            "properties": [
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "unit",
+                "value": "suffix: fps"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 38,
+        "w": 16,
+        "h": 7
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "id": 20
+    },
+    {
+      "type": "text",
+      "title": "What the alarm means / what to do",
+      "datasource": null,
+      "options": {
+        "mode": "markdown",
+        "content": "**The iXon3 buzzer** = a thermal switch on the heat sink has cut power to the TE cooler (iXon3 Hardware Guide §1.3.7). It resets by itself once the head has cooled. Causes: chiller off or low water flow, blocked vents, fan off/low, room above 30 °C.\n\nThe SDK cannot read this switch on the iXon3, and the **CCD sensor temperature looks normal** until the sensor warms up. Watch the **TEC voltage**, the **head temperature** and **sensor − set point**.\n\n**On ALARM:** check the chiller (running, flow, water above the dew point), fan = full, vents. If it repeats, switch the cooler off — repeated trips wear out the thermal switch."
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 38,
+        "w": 8,
+        "h": 7
+      },
+      "id": 21
+    }
+  ]
+}

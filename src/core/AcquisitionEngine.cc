@@ -5,11 +5,14 @@
 
 #include <AndorEMCCDcontroller/AcquisitionEngine.h>
 
+#include <algorithm>
 #include <chrono>
 #include <fstream>
 #include <stdexcept>
 
 #include <spdlog/spdlog.h>
+
+#include <AndorEMCCDcontroller/Telemetry.h>
 
 namespace AndorEMCCDcontroller {
 
@@ -69,7 +72,8 @@ AcquisitionEngine::AcquisitionEngine(std::unique_ptr<Camera> camera,
       context_(context),
       config_(std::move(config)),
       store_(config_.history_frames, config_.history_bytes),
-      settings_(config_.initial_settings) {}
+      settings_(config_.initial_settings),
+      thermal_watch_(config_.cooling_lost_margin_c) {}
 
 AcquisitionEngine::~AcquisitionEngine() { Stop(); }
 
@@ -127,6 +131,9 @@ bool AcquisitionEngine::Start(std::string* error) {
   info_ = camera_->Info();
   spdlog::info("camera: {} serial {} ({}x{})", info_.model, info_.serial,
                info_.sensor_width, info_.sensor_height);
+  if (!info_.thermal_probe.empty()) {
+    spdlog::info("thermal readouts: {}", info_.thermal_probe);
+  }
   {
     std::lock_guard<std::mutex> lock(status_mutex_);
     status_.state = CameraState::kIdle;
@@ -517,16 +524,43 @@ void AcquisitionEngine::DrainFrames() {
 
 void AcquisitionEngine::PollStatus() {
   temperature_ = camera_->ReadTemperature();
+  const int target = std::clamp(settings_.target_temperature_c,
+                                info_.temperature_min_c,
+                                info_.temperature_max_c);
+  if (thermal_watch_.Update(temperature_, target)) {
+    switch (thermal_watch_.Level()) {
+      case ThermalAlarm::kAlarm:
+        spdlog::error("thermal alarm: {}", thermal_watch_.Reason());
+        break;
+      case ThermalAlarm::kWarning:
+        spdlog::warn("thermal warning: {}", thermal_watch_.Reason());
+        break;
+      case ThermalAlarm::kOk:
+        spdlog::info("thermal state normal again ({:.1f} C)",
+                     temperature_.temperature_c);
+        break;
+    }
+  }
   std::lock_guard<std::mutex> lock(status_mutex_);
   status_.temperature_c = temperature_.temperature_c;
   status_.temperature_status = temperature_.status;
   status_.cooler_on = temperature_.cooler_on;
+  status_.target_temperature_c = target;
+  status_.fan_mode = settings_.fan_mode;
+  status_.ambient_temperature_c = temperature_.ambient_temperature_c;
+  status_.cooler_voltage_v = temperature_.cooler_voltage_v;
+  status_.tec_overheat = temperature_.tec_overheat;
+  status_.thermal_alarm = thermal_watch_.Level();
+  status_.thermal_alarm_reason = thermal_watch_.Reason();
+  status_.thermal_alarm_count = thermal_watch_.AlarmCount();
   status_.timestamp = UnixTimeNow();
 }
 
 void AcquisitionEngine::PublishStatus() {
+  const CameraStatus status = Status();
+  if (config_.telemetry) config_.telemetry->Offer(status);
   if (!pub_) return;
-  const std::string body = Json(Status()).dump();
+  const std::string body = Json(status).dump();
   pub_->send(zmq::buffer(std::string_view(kTopicStatus)),
              zmq::send_flags::sndmore | zmq::send_flags::dontwait);
   pub_->send(zmq::buffer(body), zmq::send_flags::dontwait);

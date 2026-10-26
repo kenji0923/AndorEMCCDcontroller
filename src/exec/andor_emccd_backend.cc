@@ -23,6 +23,7 @@
 #include <AndorEMCCDcontroller/Camera.h>
 #include <AndorEMCCDcontroller/ControlServer.h>
 #include <AndorEMCCDcontroller/Protocol.h>
+#include <AndorEMCCDcontroller/Telemetry.h>
 
 namespace aec = AndorEMCCDcontroller;
 
@@ -50,7 +51,32 @@ struct BackendConfig {
   aec::EngineConfig engine;
   aec::Json initial_settings = aec::Json::object();
   double control_lease_s = 10.0;  // Control is released after this silence.
+  aec::TelemetryConfig telemetry;  // Status to Telegraf; off without a url.
 };
+
+/** Reads the "telemetry" object of the configuration file. */
+bool LoadTelemetryConfig(const aec::Json& j, aec::TelemetryConfig* t,
+                         std::string* error) {
+  t->url = j.value("url", t->url);
+  t->interval_s = j.value("interval_s", t->interval_s);
+  t->timeout_s = j.value("timeout_s", t->timeout_s);
+  t->measurement = j.value("measurement", t->measurement);
+  t->tags.clear();
+  const aec::Json tags = j.value("tags", aec::Json::object());
+  for (const auto& [key, value] : tags.items()) {
+    // Numbers are fine too, e.g. "serial": 6598.
+    t->tags.emplace_back(key, value.is_string() ? value.get<std::string>()
+                                                : value.dump());
+  }
+  if (t->url.empty()) return true;
+  aec::HttpUrl parsed;
+  if (!aec::ParseHttpUrl(t->url, &parsed, error)) return false;
+  if (t->interval_s <= 0.0 || t->timeout_s <= 0.0 || t->measurement.empty()) {
+    *error = "interval_s and timeout_s must be > 0, measurement non-empty";
+    return false;
+  }
+  return true;
+}
 
 bool LoadConfig(const std::string& path, BackendConfig* c, std::string* error) {
   std::ifstream in(path);
@@ -84,7 +110,15 @@ bool LoadConfig(const std::string& path, BackendConfig* c, std::string* error) {
         j.value("warmup_target_c", c->engine.warmup_target_c);
     c->engine.warmup_timeout_s =
         j.value("warmup_timeout_s", c->engine.warmup_timeout_s);
+    c->engine.cooling_lost_margin_c =
+        j.value("cooling_lost_margin_c", c->engine.cooling_lost_margin_c);
     c->initial_settings = j.value("initial_settings", aec::Json::object());
+    std::string telemetry_error;
+    if (!LoadTelemetryConfig(j.value("telemetry", aec::Json::object()),
+                             &c->telemetry, &telemetry_error)) {
+      *error = path + ": telemetry: " + telemetry_error;
+      return false;
+    }
   } catch (const std::exception& e) {
     *error = path + ": " + e.what();
     return false;
@@ -126,6 +160,9 @@ int main(int argc, char** argv) {
   program.add_argument("--no-warmup")
       .help("do not warm the sensor before shutdown")
       .flag();
+  program.add_argument("--no-telemetry")
+      .help("do not send the status to the configured telemetry url")
+      .flag();
   program.add_argument("--log-level").default_value(std::string("info"));
 
   try {
@@ -154,6 +191,7 @@ int main(int argc, char** argv) {
     config.engine.settings_path = *path;
   }
   if (program.get<bool>("--no-warmup")) config.engine.warmup_on_exit = false;
+  if (program.get<bool>("--no-telemetry")) config.telemetry.url.clear();
   const auto control_args = program.get<std::vector<std::string>>("--control");
   const auto data_args = program.get<std::vector<std::string>>("--data");
   if (!control_args.empty()) config.control_endpoints = control_args;
@@ -204,6 +242,15 @@ int main(int argc, char** argv) {
 
   std::signal(SIGINT, OnSignal);
   std::signal(SIGTERM, OnSignal);
+
+  // Declared before the engine, which reports to it until it has stopped.
+  std::unique_ptr<aec::TelemetryPublisher> telemetry;
+  if (!config.telemetry.url.empty()) {
+    telemetry = std::make_unique<aec::TelemetryPublisher>(config.telemetry);
+    config.engine.telemetry = telemetry.get();
+    spdlog::info("telemetry: {} every {:g} s as {}", config.telemetry.url,
+                 config.telemetry.interval_s, config.telemetry.measurement);
+  }
 
   zmq::context_t context(2);
   aec::AcquisitionEngine engine(std::move(camera), &context, config.engine);

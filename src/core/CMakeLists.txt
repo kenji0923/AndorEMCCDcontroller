@@ -106,7 +106,9 @@ if(AEC_BUILD_BACKEND)
     AndorEMCCDcontroller_add_library_std(Engine AcquisitionEngine)
     target_sources(Engine PRIVATE
         FrameStore.cc include/${PROJECT_NAME}/FrameStore.h
-        ControlServer.cc include/${PROJECT_NAME}/ControlServer.h)
+        ControlServer.cc include/${PROJECT_NAME}/ControlServer.h
+        ThermalWatch.cc include/${PROJECT_NAME}/ThermalWatch.h
+        Telemetry.cc include/${PROJECT_NAME}/Telemetry.h)
     target_link_libraries(Engine PUBLIC Camera cppzmq spdlog::spdlog)
 endif()
 

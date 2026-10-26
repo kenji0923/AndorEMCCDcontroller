@@ -11,6 +11,7 @@
 #define AndorEMCCDcontroller__CameraSettings_h
 
 #include <cstdint>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -41,16 +42,27 @@ enum class FanMode { kFull = 0, kLow = 1, kOff = 2 };
 /** Values equal the SDK SetShutter() mode codes. */
 enum class ShutterMode { kAuto = 0, kOpen = 1, kClosed = 2 };
 
+// The values of the next three enums are the telemetry codes (Grafana value
+// mappings depend on them): append, do not renumber.
+
 enum class TemperatureStatus {
-  kOff,
-  kNotReached,
-  kNotStabilized,
-  kStabilized,
-  kDrift,
-  kUnknown,
+  kOff = 0,
+  kNotReached = 1,
+  kNotStabilized = 2,
+  kStabilized = 3,
+  kDrift = 4,
+  kUnknown = 5,
 };
 
-enum class CameraState { kIdle, kAcquiring, kError, kDisconnected };
+enum class CameraState {
+  kIdle = 0,
+  kAcquiring = 1,
+  kError = 2,
+  kDisconnected = 3,
+};
+
+/** Cooling health judged by the backend, in increasing severity. */
+enum class ThermalAlarm { kOk = 0, kWarning = 1, kAlarm = 2 };
 
 std::string ToString(AcquisitionMode v);
 std::string ToString(TriggerMode v);
@@ -58,6 +70,7 @@ std::string ToString(FanMode v);
 std::string ToString(ShutterMode v);
 std::string ToString(TemperatureStatus v);
 std::string ToString(CameraState v);
+std::string ToString(ThermalAlarm v);
 
 /** All names accepted for each enum, in display order. */
 const std::vector<std::string>& AcquisitionModeNames();
@@ -181,6 +194,11 @@ struct CameraInfo {
   bool has_count_convert = false;
   bool has_metadata = false;
   bool has_frame_transfer = false;
+  // Thermal readouts besides the sensor, found when the camera was opened.
+  bool has_ambient_temperature = false;
+  bool has_cooler_voltage = false;
+  bool has_tec_status = false;
+  std::string thermal_probe;  ///< What the probe found, for the log.
 };
 
 void to_json(Json& j, const CameraInfo& info);
@@ -207,9 +225,17 @@ void to_json(Json& j, const ControlInfo& c);
 /** Live status published periodically. */
 struct CameraStatus {
   CameraState state = CameraState::kDisconnected;
-  double temperature_c = 0.0;
+  double temperature_c = 0.0;  ///< CCD sensor.
   TemperatureStatus temperature_status = TemperatureStatus::kUnknown;
   bool cooler_on = false;
+  int target_temperature_c = 0;
+  FanMode fan_mode = FanMode::kFull;
+  double ambient_temperature_c = std::numeric_limits<double>::quiet_NaN();
+  double cooler_voltage_v = std::numeric_limits<double>::quiet_NaN();
+  int tec_overheat = -1;  ///< -1 unknown, 0 normal, 1 tripped.
+  ThermalAlarm thermal_alarm = ThermalAlarm::kOk;
+  std::string thermal_alarm_reason;
+  std::uint64_t thermal_alarm_count = 0;  ///< Times the alarm was entered.
   std::uint64_t run_id = 0;
   std::string run_mode;
   std::int64_t frames_in_run = 0;  ///< Frames read out in the current run.

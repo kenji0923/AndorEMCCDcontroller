@@ -64,6 +64,7 @@ svg .label { fill: var(--muted); font-size: 12px; }
 <li><a href="#stream-rings">リングバッファと欠落通知</a></li>
 <li><a href="#display-average">画像の平均表示</a></li>
 <li><a href="#stream-recording">ライブ画像の逐次保存</a></li>
+<li><a href="#thermal">冷却の監視と記録（Telegraf / Grafana）</a></li>
 </ol></nav>
 
 <h2 id="arch">1. 構成</h2>
@@ -103,6 +104,7 @@ svg .label { fill: var(--muted); font-size: 12px; }
 <li><b>同一ホスト</b>のクライアントは <code>/run/andor-emccd</code> の Unix ドメインソケット（IPC）を自動で使い、ネットワークスタックを通りません。他ホストは TCP です。</li>
 <li>カメラが開けない場合（ドライバ未ロードなど）もサービスは動き続け、status に <code>disconnected</code> と SDK のエラーを出して 30 秒ごとに再試行します。</li>
 <li>停止時は、冷却中なら -20 °C まで昇温してから <code>ShutDown</code> します（<code>cooler_persist_on_shutdown</code> または <code>warmup_on_exit: false</code> で無効）。</li>
+<li>冷却の状態（センサー温度に加え、ヘッドの冷却制御回路の温度と TE クーラーの電圧）を監視し、冷却が失われたら警報をログと status に出します。<code>telemetry</code> を設定すると Telegraf に送り、Grafana で見られます（<a href="#thermal">15 章</a>）。</li>
 </ul>
 
 <h2 id="install">2. インストール</h2>
@@ -182,7 +184,7 @@ systemctl --user restart andor-emccd-backend-user
 # シミュレータで試す：AEC_CAMERA=sim deploy/install_backend_user.sh build（backend.json を作り直す）
 # 停止・無効化：systemctl --user disable --now andor-emccd-backend-user</code></pre>
 <p><code>prepare_user_service_root.sh</code> は、andor グループを作ってユーザーを加え、udev ルール、<code>/etc/tmpfiles.d/andor-emccd.conf</code>（<code>/run/andor-emccd</code> を root:andor、2775 で作る）、firewalld のポート、<code>loginctl enable-linger</code>（ログインしていなくても起動時にサービスを開始し、ログアウトしても止めない）を設定し、システムサービスがあれば無効化します。<code>install_backend_user.sh</code> は、プログラムと説明書を <code>~/.local</code> に、<code>deploy/backend.json</code> を基にした設定（保存先をホームに変えたもの）を <code>~/.config/andor-emccd</code> に置き、<code>~/.config/systemd/user/andor-emccd-backend-user.service</code> を有効にして起動します。カメラPCで、シミュレータの設定によるインストール、起動、TCP での取得、停止、設定の保存を確認しました（2026-10-22。確認後に削除）。</p>
-<p>設定ファイル <code>backend.json</code>（コメント可）の主な項目：<code>camera</code>（<code>andor</code>/<code>sim</code>）、<code>bind_address</code>、ポート、<code>history_frames</code>/<code>history_megabytes</code>（<code>fetch</code> で取り出せる履歴）、<code>initial_settings</code>。最後に適用した設定は <code>settings_file</code>（上の表）に保存され、再起動後に復元されます。</p>
+<p>設定ファイル <code>backend.json</code>（コメント可）の主な項目：<code>camera</code>（<code>andor</code>/<code>sim</code>）、<code>bind_address</code>、ポート、<code>history_frames</code>/<code>history_megabytes</code>（<code>fetch</code> で取り出せる履歴）、<code>initial_settings</code>、<code>cooling_lost_margin_c</code> と <code>telemetry</code>（<a href="#thermal">15 章</a>）。最後に適用した設定は <code>settings_file</code>（上の表）に保存され、再起動後に復元されます。</p>
 
 <h2 id="control">3. 設定変更権</h2>
 <p>複数のクライアントが同時に設定を変えないよう、バックエンドが「設定変更権」を1つだけ発行します。認証はありません。</p>
@@ -265,7 +267,7 @@ AndorEMCCDRemote("emccd", parent_device=trigger_do, connection="trigger",
 <tr><td>get_info</td><td>–</td><td>型番、シリアル、センサーサイズ、アンプと HS 速度、VS 速度、プリアンプゲイン、EM ゲイン範囲、温度範囲、利用可能なトリガモード、機能フラグ</td></tr>
 <tr><td>get_settings</td><td>–</td><td>全設定（<a href="#settings">7章</a>）</td></tr>
 <tr><td>set_settings</td><td>settings: {部分}</td><td>settings, warnings, timings。不正なキーや値があれば全体を拒否。連続取得中なら再スタート、キネティック run 中はエラー</td></tr>
-<tr><td>get_status</td><td>–</td><td>state, temperature_c, temperature_status, cooler_on, run_id, frames_in_run, frames_expected, fps, em_gain（実際に掛かっている EM ゲイン。オフ・通常アンプなら 0）, timings, last_error, control</td></tr>
+<tr><td>get_status</td><td>–</td><td>state, temperature_c（CCD センサー）, temperature_status, cooler_on, target_temperature_c, fan_mode, ambient_temperature_c, cooler_voltage_v, tec_overheat（読めないものは null）, thermal_alarm（ok / warning / alarm）, thermal_alarm_reason, thermal_alarm_count（<a href="#thermal">15 章</a>）, run_id, frames_in_run, frames_expected, fps, em_gain（実際に掛かっている EM ゲイン。オフ・通常アンプなら 0）, timings, last_error, control</td></tr>
 <tr><td>start</td><td>settings?</td><td>run_id, expected, timings</td></tr>
 <tr><td>arm</td><td>n_frames, settings?</td><td>キネティック N 枚で開始（labscript 用）</td></tr>
 <tr><td>stop</td><td>–</td><td>stopped, run_id</td></tr>
@@ -339,7 +341,7 @@ AndorEMCCDRemote("emccd", parent_device=trigger_do, connection="trigger",
 <li><b>Isolated crop</b>：同じ大きさの通常のサブ画像より速くなること、画像の大きさが一致すること、切り出す角の位置。</li>
 <li><b>EM ゲイン</b>：モードごとの範囲（<code>get_info</code> の em_gain_range）と、advanced の可否。オフ（最小値）で信号が通常アンプ相当になり、オンで設定値どおりに増えること。</li>
 <li><b>シャッタ</b>：外部シャッタの TTL（SetShutterEx / SetShutter を機能ビットで選択）。</li>
-<li><b>冷却</b>：目標温度への到達と安定（status の色）、取得中も温度が読めるか（読めない機種は直前の値を保持）。サービス停止時に -20 °C まで昇温してから ShutDown すること（2 回目のシグナルで中断）。起動時、冷却が動いていればそのまま維持すること。</li>
+<li><b>冷却</b>：目標温度への到達と安定（status の色）、取得中も温度が読めるか（読めない機種は直前の値を保持）。サービス停止時に -20 °C まで昇温してから ShutDown すること（2 回目のシグナルで中断）。起動時、冷却が動いていればそのまま維持すること。ヘッドの温度と TE クーラーの電圧が得られるか（ログの <code>thermal readouts:</code>、<a href="#thermal">15 章</a>）。</li>
 <li><b>カウント変換</b>：electrons / photons で int32 データが返ること。</li>
 <li><b>性能</b>：全画面 10 MHz で約 35 fps、クロップ時のフレームレート、LAN 経由の取りこぼし 0。</li>
 </ol>
@@ -468,6 +470,7 @@ build-win\deploy\andor_emccd_gui.exe --host camera-pc --name winpc</code></pre><
     Protocol, CameraSettings      共有（JSON, 列挙名）
     Camera, SimCamera, AndorCamera バックエンド: カメラ抽象、模擬カメラ、SDK2 実装
     FrameStore, AcquisitionEngine, ControlServer
+    ThermalWatch, Telemetry       冷却の警報、Telegraf への送信
     Analysis, Expression, Colormap, ImageIO, CameraClient   フロントエンド（Qt 非依存）
   exec/andor_emccd_backend.cc
   exec/gui/                Qt6 GUI
@@ -476,6 +479,7 @@ python/andor_emccd/        Python クライアント
 python/labscript_devices/  labscript デバイス
 python/bench/              ベンチマーク
 deploy/                    systemd（システム/ユーザー）, 設定例, udev, tmpfiles, インストーラ
+deploy/grafana/            Grafana ダッシュボード（冷却の監視）
 tools/                     build_windows.bat（Windows ビルド）, generate_colormaps.py, camera_pc/（カメラPCの準備）</code></pre>
 
 <h2 id="stream-rings">12. リングバッファとクライアント別の欠落通知</h2>
@@ -581,6 +585,58 @@ fpsで間引いた画像に付いていた受信欠落通知も、次に保存�
 Linuxで34件、Windows（MSVC）で26件のテストが通過しました。
 GUIでは表示を3枚平均にしたまま5 fps以下で13枚の生uint16画像を保存し、Pythonで読み戻しました。
 Windowsで書いたファイルもLinuxのPythonから読み戻せることを確認済みです。</p>
+
+<h2 id="thermal">15. 冷却の監視と記録（Telegraf / Grafana）</h2>
+<h3>15.1 センサー温度だけでは足りない理由</h3>
+<p>status の <code>temperature_c</code>（GUI の Status に出る温度）は <code>GetTemperatureF</code> による <b>CCD センサーの温度</b>で、ヒートシンクの温度ではありません。iXon3 のハードウェアガイド 1.3.7「Overheating」によると、ヒートシンクにはサーマルスイッチがあり、規定の温度を超えると <b>TE クーラーの電源を切ってブザーを鳴らします</b>。ヘッドが冷えると自動で復帰します。スイッチの動作回数には限りがあるので、遮断を繰り返す条件で使ってはいけません。原因は、通気口がふさがれている、水冷の流量が足りない・止まっている、室温が 30 °C を超えている、などです。</p>
+<p>このスイッチは SDK から読めません（SDK 2.103 の <code>libandor.so</code> を逆アセンブルして確認、2026-10-23）。</p>
+<ul>
+<li><code>GetTECStatus</code>（「TEC が過熱したか」）と <code>GetFrontEndStatus</code> は iVac 専用で、iXon には <code>DRV_NOT_SUPPORTED</code> を返します。</li>
+<li>SDK 内部の過熱トリップの読み出し（<code>Micro::TempTripState</code>）は iVac / iVac CCD / iKon-XL だけです。過熱フラグのレジスタ（<code>OverTempFlag</code>、<code>HeatSinkSensor</code>）は USB カメラの処理でしか使われていません。</li>
+</ul>
+<p>そのため遮断の直後もセンサー温度はしばらく正常に見え、センサーが温まり始めてから初めて分かります。そこで次の 2 つで監視します。</p>
+<ol>
+<li><b>ヘッドの温度と TE クーラーの電圧</b>：<code>GetTemperatureStatus</code>（マニュアルでは「RESERVED」）は、iXon の 8 ビット冷却制御では、ヘッドの冷却制御回路の ambient 温度（I2C レジスタ <code>TemperatureDACAmbient</code>、LM60 相当の換算）と TE クーラーの電圧（<code>TemperatureDACCoolerVoltage</code>、0.03 V/LSB）を I2C で読みます（読み出しだけで、書き込みはしません）。起動時に 1 回試し、値が得られれば 2 秒ごとに読みます（取得中は、温度を取得中に読める機種だけ）。結果はログの <code>thermal readouts:</code> 行と、<code>get_info</code> の <code>has_ambient_temperature</code>、<code>has_cooler_voltage</code>、<code>thermal_probe</code> に出ます。値が得られない機種では <code>null</code> になります。</li>
+<li><b>冷却喪失の警報</b>（<code>ThermalWatch</code>）：クーラーがオンで、センサーが一度設定温度に達した（設定温度 +3 °C 以下になった）後に、設定温度 + <code>cooling_lost_margin_c</code>（既定 5 °C）を超えたら <code>alarm</code>。SDK が <code>drift</code>（安定後に外れた）を返すか、センサー温度が読めないときは <code>warning</code>。設定温度を変えたときとクーラーをオフにしたときは、再び到達するまで判定しません。状態が変わるたびに 1 回だけログに出します（<code>[error] thermal alarm: cooling lost: ...</code>、<code>[warning] thermal warning: ...</code>、<code>[info] thermal state normal again</code>）。</li>
+</ol>
+<p>status に加えた項目：<code>target_temperature_c</code>、<code>fan_mode</code>、<code>ambient_temperature_c</code>、<code>cooler_voltage_v</code>、<code>tec_overheat</code>（読めないものは <code>null</code>）、<code>thermal_alarm</code>（<code>ok</code> / <code>warning</code> / <code>alarm</code>）、<code>thermal_alarm_reason</code>、<code>thermal_alarm_count</code>（起動後に <code>alarm</code> になった回数）。自動で冷却を止めるなどの操作はしません。</p>
+
+<h3>15.2 Telegraf への送信</h3>
+<pre><code>"cooling_lost_margin_c": 5,
+"telemetry": {
+  "url": "http://192.168.1.5:8080/telegraf",   // "" で送らない（deploy/backend.json の既定）
+  "interval_s": 5,
+  "timeout_s": 3,
+  "measurement": "andor_emccd",
+  "tags": {"tlg_bucket": "laserlab", "site": "laserlab", "device": "emccd",
+           "model": "DU897_BV", "serial": "6598"}
+}</code></pre>
+<p>InfluxDB line protocol を HTTP POST します（Telegraf の <code>http_listener_v2</code>、<code>/opt/labtime</code> の時刻監視と同じ形式）。<code>host</code> タグ（ホスト名）は自動で付き、タイムスタンプ（ns）は status を読んだ時刻です。送信は専用スレッドで行い、カメラのスレッドを待たせません。届かない間は最大 4320 点（5 秒間隔で 6 時間）を保持し、次の送信でまとめて送ります。失敗は最初と、続く場合は 10 分ごとにログに出ます。<code>--no-telemetry</code> で一時的に止められます。</p>
+<p>VictoriaMetrics では <code>andor_emccd_&lt;field&gt;{db="laserlab", host="LaserLabLinux1", device="emccd", ...}</code> になります（Telegraf が <code>tlg_bucket</code> を <code>db</code> ラベルにします）。カメラが <code>disconnected</code> の間は <code>state</code> だけを送り、読めない値は古い値を送らずに省きます。</p>
+<div class="table-wrap"><table>
+<tr><th>field</th><th>型</th><th>内容</th></tr>
+<tr><td>sensor_temperature_c</td><td>float</td><td>CCD センサー温度（読めないときは送らない）</td></tr>
+<tr><td>temperature_status</td><td>int</td><td>0 off, 1 not_reached, 2 not_stabilized, 3 stabilized, 4 drift, 5 unknown（読めない）</td></tr>
+<tr><td>target_temperature_c</td><td>int</td><td>設定温度</td></tr>
+<tr><td>cooler_on</td><td>int</td><td>0 / 1（SDK の <code>IsCoolerOn</code>。サーマルスイッチの遮断では変わらない）</td></tr>
+<tr><td>fan_mode</td><td>int</td><td>0 full, 1 low, 2 off</td></tr>
+<tr><td>ambient_temperature_c</td><td>float</td><td>ヘッドの冷却制御回路の温度（<code>GetTemperatureStatus</code> の AmbientTemp。得られる機種だけ）</td></tr>
+<tr><td>cooler_voltage_v</td><td>float</td><td>TE クーラーの電圧（同 CoolerVolts。得られる機種だけ。冷却中は約 7.3 V で、負荷で少し下がる電源電圧のような値。15.4 節）</td></tr>
+<tr><td>tec_overheat</td><td>int</td><td><code>GetTECStatus</code>（対応する機種だけ。iXon では送らない）</td></tr>
+<tr><td>thermal_alarm</td><td>int</td><td>0 ok, 1 warning, 2 alarm</td></tr>
+<tr><td>thermal_alarm_count</td><td>int</td><td>起動後に alarm になった回数（0.5 秒ごとに判定するので、5 秒の間の短い alarm も数える）</td></tr>
+<tr><td>em_gain</td><td>int</td><td>実際に掛かっている EM ゲイン</td></tr>
+<tr><td>fps</td><td>float</td><td>取得のフレームレート</td></tr>
+<tr><td>state</td><td>int</td><td>0 idle, 1 acquiring, 2 error, 3 disconnected</td></tr>
+</table></div>
+
+<h3>15.3 Grafana ダッシュボード</h3>
+<p><code>deploy/grafana/andor-emccd-dashboard.json</code> を Grafana（<code>http://192.168.1.5:3000</code>）の Dashboards → New → Import → Upload dashboard JSON file で読み込み、上部の Data source で VictoriaMetrics（Prometheus 型）を選びます。uid が固定（<code>andor-emccd-cooling</code>）なので、更新版は同じ手順で上書きできます。警報（thermal alarm）、センサー − 設定温度、TE クーラーの電圧、ヘッドの温度、最後の受信からの秒数、時間範囲内の最悪レベルと alarm 回数、各値の推移と状態の時系列を表示します。ヘッド温度の色のしきい値（45 / 50 °C）は仮の値なので、記録がたまってから調整してください。</p>
+
+<h3>15.4 確認</h3>
+<p>模擬カメラ（<code>AEC_SIM_TRIP_AT_S=45</code> で起動 45 秒後から 60 秒間スイッチが切れる模擬）と手元の HTTP サーバーで、150 秒間に 150 点が届くこと、遮断で電圧が 0 V になりヘッド温度が上がること、センサーが設定温度 +5 °C を超えた時点で 1 回だけ <code>thermal alarm: cooling lost</code> が出て復帰時に <code>normal again</code> が出ることを確認しました（2026-10-23）。単体試験は <code>test_telemetry</code>（警報の判定、line protocol のエスケープ、URL、HTTP の送信とエラー、送れない間の保持、エンジンからの送信）です。</p>
+<p><b>実機（2026-10-23、水冷あり、設定 -80 °C）</b>：起動時のログは <code>thermal readouts: GetTemperatureStatus: sensor -79.25 C, target -79.90 C, ambient 37.45 C, cooler 7.32 V; GetTECStatus: DRV_NOT_SUPPORTED</code>。センサーの値は <code>GetTemperatureF</code>（-79.247 °C）と一致し、換算が正しいことを確認しました。値は 8 ビットで、センサー 0.65 °C、ヘッド 1.58 °C、電圧 0.03 V 刻みです。Telegraf 経由で VictoriaMetrics に 12 系列が約 5 秒ごとに入ります。再起動の直後はセンサーが 2 分ほど ±2 °C 動き（-79.9 → -77.9 °C、<code>not_stabilized</code>）、その後 -79.25 °C で <code>stabilized</code> に戻りました。ヘッドは 37〜39 °C です。</p>
+<p>設定温度を -80 → -75 °C に変えたところ（18:25）、ヘッドの温度は 1 分以内に約 42 → 39 °C に下がりましたが、<code>cooler_voltage_v</code> は 7.29 → 7.35 V とむしろ少し上がり、変更の直後だけ 7.53 V になりました。この値は駆動の割合ではなく、負荷で少し下がる TE クーラーの電源電圧のように振る舞います（レジスタの最大 7.65 V に近いことを「全力で冷やしている」と読むのは誤りでした）。負荷の目安にはヘッドの温度が向いています。再起動の後、-80 °C ではヘッドが 20 分ほどかけて 37 → 42 °C に上がりました（再起動でヘッドの回路に電源が入り直したためと考えられます）。遮断のときにこの電圧が 0 V に落ちるのか、無負荷の約 7.5 V に上がるのかは、次に起きたときの記録で確かめてください。</p>
 </main>
 </body>
 </html>

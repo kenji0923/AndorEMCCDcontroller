@@ -7,6 +7,8 @@
 #define AndorEMCCDcontroller__AndorCamera_h
 
 #include <atomic>
+#include <chrono>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -45,6 +47,8 @@ class AndorCamera : public Camera {
 
  private:
   void QueryInfo();
+  void ProbeThermalReadouts();
+  void ReadThermalExtras(TemperatureReading* r);
   Frame EmptyFrame() const;
   bool RetrieveAccumulated(std::vector<Frame>* frames, std::string* error);
 
@@ -64,6 +68,11 @@ class AndorCamera : public Camera {
   unsigned int trigger_caps_ = 0;
   bool internal_shutter_ = false;
   TemperatureReading last_temperature_;
+  // Last values of the readouts polled every few seconds.
+  std::chrono::steady_clock::time_point next_extras_{};
+  double ambient_c_ = std::numeric_limits<double>::quiet_NaN();
+  double cooler_voltage_v_ = std::numeric_limits<double>::quiet_NaN();
+  int tec_overheat_ = -1;
 };
 
 }  // namespace AndorEMCCDcontroller
