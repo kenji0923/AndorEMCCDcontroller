@@ -164,7 +164,24 @@ void ControlServer::HandleRequest(std::vector<zmq::message_t>* parts) {
     const Json args = request.value("args", Json::object());
     const ClientIdentity client = Identify(request, body);
     Json result;
-    if (cmd == "stream_open") {
+    if (cmd == "set_display_profile") {
+      const std::string key = args.at("profile_id").get<std::string>();
+      const Json profile = args.at("profile");
+      if (key.empty() || key.size() > 128 || !profile.is_object() ||
+          profile.dump().size() > 256 * 1024)
+        throw std::runtime_error("Invalid display profile");
+      if (!display_profiles_.contains(key) && display_profiles_.size() >= 64) {
+        auto oldest = display_profiles_.begin();
+        for (auto it = display_profiles_.begin(); it != display_profiles_.end(); ++it)
+          if (it.value()["updated_at"] < oldest.value()["updated_at"]) oldest = it;
+        display_profiles_.erase(oldest);
+      }
+      display_profiles_[key] = Json{{"profile", profile}, {"client", client.display},
+                                   {"updated_at", UnixTimeNow()}};
+      result = Json{{"stored", true}};
+    } else if (cmd == "get_display_profiles") {
+      result = display_profiles_;
+    } else if (cmd == "stream_open") {
       engine_->Store().OpenStream(client.id);
       result = Json{{"lease_s", 60}};
     } else if (cmd == "stream_close") {
@@ -217,6 +234,8 @@ Json ControlServer::Dispatch(const std::string& cmd, const Json& args,
   }
   if (cmd == "get_info") return engine_->GetInfo();
   if (cmd == "get_settings") return engine_->GetSettings();
+  if (cmd == "get_calibration")
+    return engine_->GetCalibration(args.value("wavelength_nm", 780.0));
   if (cmd == "set_settings") {
     return engine_->SetSettings(args.contains("settings") ? args.at("settings")
                                                           : args);

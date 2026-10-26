@@ -91,6 +91,7 @@ class TrendPanel : public QWidget {
   void Select(const std::vector<std::string>& names);
   /** Time window, normalization and value-axis scale, for QSettings. */
   void SaveState(QSettings* s) const;
+  Json ToJson() const;
   void RestoreState(const QSettings& s);
 
  signals:

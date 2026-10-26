@@ -34,6 +34,7 @@ class QPushButton;
 namespace AndorEMCCDcontroller {
 
 class AnalysisPanel;
+class ConversionPanel;
 class ColorBar;
 class ImageView;
 class SettingsPanel;
@@ -89,6 +90,10 @@ class MainWindow : public QMainWindow {
   void UpdateColormap();
   void ReconfigureAnalysis();
   void SaveCurrentFrame();
+  void SaveConvertedFrame();
+  void RefreshDisplayMetadata();
+  void RefreshCalibration();
+  Json ConversionConfig() const;
   void SaveView();
   void RecordFrames();
   void SaveRunFromBackend();
@@ -120,6 +125,13 @@ class MainWindow : public QMainWindow {
   ImageView* view_ = nullptr;
   ColorBar* colorbar_ = nullptr;
   SettingsPanel* settings_panel_ = nullptr;
+  ConversionPanel* conversion_panel_ = nullptr;
+  Json calibration_ = Json::object();
+  Json display_metadata_ = Json::object();
+  bool calibration_dirty_ = true;
+  bool profile_supported_ = true;
+  double profile_sent_at_ = 0.0;
+  std::string profile_id_;
   AnalysisPanel* analysis_panel_ = nullptr;
   TrendPanel* trend_panel_ = nullptr;
 

@@ -11,6 +11,7 @@ only defined when labscript_devices is importable.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 import sys
 import threading
 import time
@@ -22,12 +23,13 @@ from andor_emccd import (AndorEMCCDClient, AndorEMCCDError,
                          ControlDeniedError, NotControllerError)
 from andor_emccd.client import DEFAULT_IPC_DIR
 from .timing import validate_exposures
+from .display_metadata import capture_display_profiles, frame_display_metadata
 
 try:
-    from labscript_devices.IMAQdxCamera.blacs_workers import (
-        IMAQdxCameraWorker, MockCamera)
+    from blacs.tab_base_classes import Worker
+    from labscript_devices.IMAQdxCamera.blacs_workers import MockCamera
 except ImportError:  # labscript/BLACS not installed: camera class only.
-    IMAQdxCameraWorker = None
+    Worker = None
     MockCamera = None
 
 # Attribute names per IMAQdx visibility level (each level includes the
@@ -297,13 +299,14 @@ class AndorEMCCDRemoteCamera:
 
 
 class _FrameSink:
-    """List-like sink used by grab_multiple; only the latest image stays in RAM."""
+    """List-like sink used by grab_multiple; writes frames straight to the sidecar."""
 
-    def __init__(self, saver, exposures):
+    def __init__(self, saver, exposures, display_snapshot=None):
         self.saver = saver
+        self.display_snapshot = display_snapshot or {"profiles": {}}
+        self.display_frames = []
         self.exposures = exposures
         self.count = 0
-        self.last_image = None
         self.repeated = {}
         for row in exposures:
             key = (row["name"], row["frametype"])
@@ -334,30 +337,87 @@ class _FrameSink:
                                  IMAGE_VERSION=np.bytes_("1.2"),
                                  IMAGE_SUBCLASS=np.bytes_("IMAGE_GRAYSCALE"),
                                  IMAGE_WHITE_IS_ZERO=np.uint8(0))
+            try:
+                display_metadata = frame_display_metadata(image, self.display_snapshot)
+            except Exception as error:
+                # Auxiliary metadata from an independent client must not discard raw data.
+                display_metadata = {"error": str(error)}
+            self.display_frames.append(display_metadata)
             self.count += 1
-            self.last_image = image
             file.flush()
 
 
-if IMAQdxCameraWorker is not None:
+def _save_shot_previews(file, device_name, exposures, shot_path, logger):
+    """Save viewer-friendly RGB images and matching PNGs after sidecar merge."""
+    camera = file[f"data/{device_name}/camera"]
+    previews = camera.create_group("previews")
+    previews.attrs["display_scale"] = "per-frame min/max grayscale"
+    try:
+        from PIL import Image
+    except ImportError:
+        Image = None
+        logger.warning("PNG export requires Pillow; HDF5 previews are still saved")
+    shot_path = Path(shot_path)
+    png_dir = shot_path.parent / f"{device_name}_png"
+    if Image is not None:
+        try:
+            png_dir.mkdir(exist_ok=True)
+        except OSError:
+            logger.warning("Could not create camera PNG directory", exc_info=True)
+            Image = None
+    repeated = {}
+    for index, row in enumerate(exposures):
+        key = (row["name"], row["frametype"])
+        source = camera["images"][row["name"]][row["frametype"]]
+        source_index = repeated.get(key, 0)
+        repeated[key] = source_index + 1
+        raw = source[source_index] if source.ndim == 3 else source[:]
+        lo, hi = float(raw.min()), float(raw.max())
+        gray = np.zeros(raw.shape, dtype=np.uint8)
+        if hi > lo:
+            gray = np.rint((raw.astype(float) - lo) * (255.0 / (hi - lo))).astype(np.uint8)
+        rgb = np.repeat(gray[:, :, None], 3, axis=2)
+        preview = previews.create_dataset(f"frame_{index:04d}", data=rgb,
+                                          compression="gzip")
+        preview.attrs.update(CLASS=np.bytes_("IMAGE"),
+            IMAGE_VERSION=np.bytes_("1.2"),
+            IMAGE_SUBCLASS=np.bytes_("IMAGE_TRUECOLOR"),
+            INTERLACE_MODE=np.bytes_("INTERLACE_PIXEL"),
+            source_dataset=source.name, source_frame_index=source_index,
+            exposure_name=row["name"], frametype=row["frametype"],
+            requested_start_s=row["t"], exposure_time_s=row["exposure_time_s"],
+            display_min=lo, display_max=hi)
+        if Image is not None:
+            png_path = png_dir / f"{shot_path.stem}_frame{index:04d}.png"
+            temporary = png_path.with_suffix(".png.tmp")
+            try:
+                Image.fromarray(rgb).save(temporary, format="PNG")
+                temporary.replace(png_path)
+                preview.attrs["png_file"] = f"{png_dir.name}/{png_path.name}"
+            except OSError:
+                logger.warning("Could not write camera PNG %s", png_path, exc_info=True)
+            finally:
+                try:
+                    temporary.unlink(missing_ok=True)
+                except OSError:
+                    logger.warning("Could not remove temporary PNG %s", temporary,
+                                   exc_info=True)
 
-    class AndorEMCCDRemoteWorker(IMAQdxCameraWorker):
+
+if Worker is not None:
+
+    class AndorEMCCDRemoteWorker(Worker):
         """Shared backend connection with a cancellable software-shot scheduler."""
 
         interface_class = AndorEMCCDRemoteCamera
 
         def init(self):
-            import zmq
-            from labscript_utils.ls_zprocess import Context, Event
+            from labscript_utils.ls_zprocess import Event
             from pythonlib.online_monitor.status import StatusMetrics
             from .shot_start import EVENT_NAME
 
             # Do not acquire control, change settings, or connect at startup.
             self.camera = None
-            self.smart_cache = {}
-            self.continuous_stop = threading.Event()
-            self.continuous_thread = None
-            self.continuous_dt = None
             self.acquisition_thread = None
             self._cancel = threading.Event()
             self._ready = threading.Event()
@@ -367,8 +427,6 @@ if IMAQdxCameraWorker is not None:
             self._start_token = None
             self._start_event = Event(EVENT_NAME, role="wait")
             self.h5_filepath = None
-            self.image_socket = Context().socket(zmq.REQ)
-            self.image_socket.connect(f"tcp://{self.parent_host}:{self.image_receiver_port}")
             self._metrics = StatusMetrics("emccd_camera", tags={"device_name": self.device_name},
                                           logger=self.logger)
 
@@ -389,8 +447,6 @@ if IMAQdxCameraWorker is not None:
             return self.read_panel()
 
         def disconnect_from_device(self):
-            if self.continuous_thread is not None:
-                self.stop_continuous()
             if self.camera is not None:
                 self.camera.close()
                 self.camera = None
@@ -426,13 +482,9 @@ if IMAQdxCameraWorker is not None:
                     if not self.mock:
                         self.camera._client.acquire_control(force=action == "take_control")
                 elif action == "release":
-                    if self.continuous_thread is not None:
-                        self.stop_continuous()
                     if not self.mock:
                         self.camera._client.release_control()
                 elif action == "settings":
-                    if self.continuous_thread is not None:
-                        raise RuntimeError("Stop continuous preview before changing settings")
                     if not self.mock and not self.camera._client.has_control():
                         raise RuntimeError("Request control before changing settings")
                     self.camera.set_attributes(values)
@@ -447,37 +499,8 @@ if IMAQdxCameraWorker is not None:
                 return {}
             if isinstance(self.camera, AndorEMCCDRemoteCamera):
                 return self.camera.get_attributes(visibility_level)
-            return super().get_attributes_as_dict(visibility_level)
-
-        def snap(self):
-            if self.camera is None:
-                raise RuntimeError("Connect and request control before snapping")
-            return super().snap()
-
-        def start_continuous(self, dt):
-            if self.camera is None:
-                raise RuntimeError("Connect and request control before continuous preview")
-            # Read back the GUI's current settings, not a cache from an earlier shot.
-            if not self.mock:
-                self.camera.attributes = self.camera._client.get_settings()
-            return super().start_continuous(dt)
-
-        def stop_continuous(self, pause=False):
-            self.continuous_stop.set()
-            self.camera.abort_acquisition()  # unblock external-trigger waits as well
-            self.continuous_thread.join()
-            self.continuous_thread = None
-            self.continuous_stop.clear()
-            self.camera.stop_acquisition()
-            if not pause:
-                self.continuous_dt = None
-
-        def continuous_loop(self, dt):
-            try:
-                super().continuous_loop(dt)
-            except Exception:
-                if not self.continuous_stop.is_set():
-                    self.logger.exception("Continuous camera preview failed")
+            return {name: self.camera.get_attribute(name)
+                    for name in self.camera.get_attribute_names(visibility_level)}
 
         def prepare_shot_start(self, token):
             self._start_token = token
@@ -497,9 +520,9 @@ if IMAQdxCameraWorker is not None:
             self._ready.clear()
             self._shot_error = None
             self._sink = None
+            self._display_snapshot = {"status": "mock", "profiles": {}}
             self._trigger_times = []
-            if self.continuous_thread is not None:
-                self.stop_continuous(pause=True)
+            self._trigger_ack_times = []
             try:
                 path = path_to_local(h5_filepath) if getattr(self, "is_remote", False) else h5_filepath
                 with h5py.File(path, "r") as file:
@@ -507,8 +530,6 @@ if IMAQdxCameraWorker is not None:
                     props = labscript_utils.properties.get(file, device_name, "device_properties")
                     if group.attrs.get("trigger_method") != "software":
                         raise ValueError("Recompile this shot for software triggering")
-                    if "waits" in file and len(file["waits"]):
-                        raise ValueError("Software camera shots do not support labscript waits")
                     rows = group["EXPOSURES"][:] if "EXPOSURES" in group else []
                     self.exposures = [dict(t=float(row["t"]),
                         exposure_time_s=float(row["exposure_time_s"]),
@@ -530,6 +551,7 @@ if IMAQdxCameraWorker is not None:
                 self._manual_settings = (dict(self.camera.attributes) if self.mock
                                          else self.camera._client.get_settings())
                 settings.update(trigger_mode="software", acquisition_mode="continuous",
+                                count_convert_mode=0,
                                 exposure_time_s=self.exposures[0]["exposure_time_s"])
                 self.camera.attributes = {}
                 self.camera.set_attributes(settings)
@@ -550,10 +572,16 @@ if IMAQdxCameraWorker is not None:
                                         acquisition_type="camera", data_label="images")
                 self._saver.add_attribute("camera", device_name)
                 self._saver.add_attribute("trigger_method", "software")
+                self._saver.add_attribute("wait_policy", "ignore")
                 self._saver.add_attribute("timing_origin", "receipt of BLACS science_starting")
                 self._saver.add_attribute("timings", json.dumps(timings))
                 self._saver.add_attribute("camera_settings", json.dumps(
                     settings if self.mock else self.camera._client.get_settings()))
+                if not self.mock:
+                    self._display_snapshot = capture_display_profiles(self.camera._client)
+                    if self._display_snapshot["status"] != "ok":
+                        self.logger.warning("GUI display settings unavailable: %s",
+                                            self._display_snapshot.get("error"))
                 level = props.get("saved_attribute_visibility_level")
                 if level is not None:
                     for key, value in self.get_attributes_as_dict(level).items():
@@ -573,10 +601,11 @@ if IMAQdxCameraWorker is not None:
         def _send_triggers(self, origin):
             try:
                 for row in self.exposures:
-                    if self._cancel.wait(max(0, origin + row["t"] - time.monotonic())):
+                    if self._cancel.wait(max(0, origin + row["t"] - time.perf_counter())):
                         return
-                    self._trigger_times.append(time.monotonic() - origin)
+                    self._trigger_times.append(time.perf_counter() - origin)
                     self.camera._client.software_trigger()
+                    self._trigger_ack_times.append(time.perf_counter() - origin)
             except Exception as error:
                 self._shot_error = error
                 self.camera.abort_acquisition()
@@ -588,7 +617,10 @@ if IMAQdxCameraWorker is not None:
             try:
                 if not self._saver.open_for_writing("a"):
                     raise RuntimeError("Could not open camera sidecar for writing")
-                self._sink = _FrameSink(self._saver, self.exposures)
+                self._sink = _FrameSink(self._saver, self.exposures, self._display_snapshot)
+                file = self._saver.get_open_file()
+                file.create_dataset("gui_settings_snapshot", dtype=h5py.string_dtype(),
+                                    data=json.dumps(self._display_snapshot, allow_nan=False))
                 self._ready.set()
                 while not self._cancel.is_set():
                     self._saver.get_open_file()  # renew long-held sidecar lock leases
@@ -599,23 +631,36 @@ if IMAQdxCameraWorker is not None:
                         continue
                 if self._cancel.is_set():
                     return
-                origin = time.monotonic()
+                # Python 3.10 on Windows uses GetTickCount64 (15.625 ms) for
+                # monotonic(); perf_counter uses QueryPerformanceCounter.
+                origin = time.perf_counter()
+                file = self._saver.get_open_file()
+                file.attrs["start_received_perf_counter_s"] = origin
+                file.attrs["start_received_unix_s"] = time.time()
+                clock = time.get_clock_info("perf_counter")
+                file.attrs["trigger_clock"] = clock.implementation
+                file.attrs["trigger_clock_resolution_s"] = clock.resolution
+                self.logger.info("Software shot start: perf_counter=%.9f", origin)
                 if self.mock:
                     for row in self.exposures:
-                        if self._cancel.wait(max(0, origin + row["t"] - time.monotonic())):
+                        if self._cancel.wait(max(0, origin + row["t"] - time.perf_counter())):
                             return
-                        self._trigger_times.append(time.monotonic() - origin)
+                        self._trigger_times.append(time.perf_counter() - origin)
                         self._sink.extend([self.camera.snap()])
                 else:
                     trigger_thread = threading.Thread(target=self._send_triggers,
                                                        args=(origin,), daemon=True)
                     trigger_thread.start()
                     self.camera.grab_multiple(len(self.exposures), self._sink)
+                    trigger_thread.join()
                 file = self._saver.get_open_file()
                 file.create_dataset("trigger_sent_times_s", data=self._trigger_times)
+                file.create_dataset("trigger_ack_times_s", data=self._trigger_ack_times)
                 file.create_dataset("requested_start_times_s", data=[row["t"] for row in self.exposures])
                 file.create_dataset("frame_headers", dtype=h5py.string_dtype(),
                     data=[json.dumps(header) for header in getattr(self.camera, "last_headers", [])])
+                file.create_dataset("frame_display_metadata", dtype=h5py.string_dtype(),
+                    data=[json.dumps(item, allow_nan=False) for item in self._sink.display_frames])
                 file.attrs["failed_shot"] = len(self._sink) != len(self.exposures)
             except Exception as error:
                 self._shot_error = self._shot_error or error
@@ -639,9 +684,6 @@ if IMAQdxCameraWorker is not None:
                 self.camera.set_attributes(settings)
             self._start_token = None
             self.h5_filepath = None
-            if (self.continuous_dt is not None and self.continuous_thread is None
-                    and (self.mock or self.camera._client.has_control())):
-                self.start_continuous(self.continuous_dt)
 
         def transition_to_manual(self):
             import labscript_utils.h5_lock  # noqa: F401
@@ -674,8 +716,14 @@ if IMAQdxCameraWorker is not None:
                         target.attrs.update(source.attrs)
                         for name in dict.fromkeys(row["name"] for row in self.exposures):
                             target[name] = source[name]
+                        try:
+                            _save_shot_previews(file, self.device_name,
+                                               self.exposures, self.h5_filepath,
+                                               self.logger)
+                        except Exception:
+                            # Previews are auxiliary; the merged raw images remain valid.
+                            self.logger.warning("Could not save camera previews", exc_info=True)
                     self.logger.info("Camera merge: %.3f s", time.monotonic() - started)
-                    self._send_image_to_parent(self._sink.last_image)
                     self._sink = None
                 return True
             finally:
@@ -695,10 +743,16 @@ if IMAQdxCameraWorker is not None:
             self._restore_manual()
             return True
 
+        def abort_buffered(self):
+            return self.abort()
+
+        def abort_transition_to_buffered(self):
+            return self.abort()
+
+        def program_manual(self, values):
+            return {}
+
         def shutdown(self):
-            # Shutdown must not restart continuous preview.
-            self.continuous_dt = None
             self.abort()
             self.disconnect_from_device()
-            self.image_socket.close(linger=0)
             self._metrics.close()

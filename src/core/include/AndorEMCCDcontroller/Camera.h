@@ -103,6 +103,10 @@ class Camera {
 
   /** Timings for the applied settings (valid after Apply...). */
   virtual Timings GetTimings() = 0;
+  // Read-only SDK calibration; unsupported values remain absent/null.
+  virtual Json GetCalibration(double wavelength_nm) {
+    return Json{{"wavelength_nm", wavelength_nm}, {"source", "unavailable"}};
+  }
 };
 
 /** Simulated iXon3 897 for development without the PCI card. */

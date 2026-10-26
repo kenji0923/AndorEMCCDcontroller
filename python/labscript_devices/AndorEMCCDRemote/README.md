@@ -1,9 +1,12 @@
 # AndorEMCCDRemote — labscript-suite device
 
 BLACS controls the remote `andor_emccd_backend` through the Python client.
-The tab retains the IMAQdx image viewer and adds the FanLab standard settings
-panel: shared committing spinboxes, unit selection, bulk Enter commits,
+The tab provides the FanLab standard settings panel: shared committing
+spinboxes, unit selection, bulk Enter commits,
 readback reconciliation, and `FrontPanelPersistence`.
+Camera images are displayed in the standalone EMCCD GUI. BLACS handles
+settings/control ownership and buffered shot acquisition/saving without an
+image viewer or image-receiver connection.
 
 ## Manual controls
 
@@ -20,9 +23,6 @@ readback reconciliation, and `FrontPanelPersistence`.
 - Numeric entries commit on Enter or a step; a commit sends pending fields in
   one transaction. Escape reverts edits. Readbacks preserve focused/pending
   edits; inactive edits expire after 60 seconds. Failed writes remain visible.
-- **Snap**, **Continuous**, and **Stop** retain the camera preview functions.
-  Stop preview before editing settings. The Attributes dialog remains available
-  for copying settings into a connection table.
 - Settings are persisted in BLACS and each shot's front panel. Reconnecting
   reads the backend's state rather than programming saved panel values.
 
@@ -75,16 +75,29 @@ For example, `0.1000` and `0.1001` seconds are valid; `0.10001` is rejected.
 Values are never silently rounded. Validation occurs both during compilation
 and before buffered acquisition, so edited/old HDF5 files cannot bypass it.
 Exposure duration itself does not have this grid restriction. Overlapping
-exposures, insufficient camera recovery time, exposures extending past `stop`,
-and shots containing labscript waits are also rejected.
+exposures, insufficient camera recovery time, and exposures extending past `stop`
+are also rejected.
+
+Labscript waits are **ignored by the software camera scheduler**. Trigger times
+remain elapsed wall-clock times from the software start notification; a wait
+does not pause, delay, or restart the camera schedule. For example, an exposure
+at 10 s still triggers 10 s after notification even if the hardware pseudoclock
+is waiting. Other devices retain their normal wait behavior. The shot and saved
+camera data record `wait_policy="ignore"`.
 
 The time origin is **receipt of BLACS's `science_starting` notification**,
 just before BLACS asks the master pseudoclock to start. The tab registers this
 callback automatically; a fresh event token is used for every attempt, including
-repeats. A Python thread waits on absolute monotonic deadlines and sends
+repeats. A Python thread waits on absolute `time.perf_counter()` deadlines and sends
 software-trigger commands. It never starts the schedule during buffered
 programming. The master must start immediately when BLACS requests it; an
 externally delayed master start is not supported.
+
+The worker saves requested, dispatch, and command-acknowledgement times, plus
+the counter implementation and resolution, with the images. On Windows Python
+3.10, `perf_counter` uses QueryPerformanceCounter; `monotonic` uses the much
+coarser GetTickCount64 clock. Dispatch and acknowledgement timestamps measure
+software activity, not the camera's physical exposure edges.
 
 The 100 µs grid is an input restriction, **not a 100 µs accuracy guarantee**.
 OS scheduling, event delivery, master start, network transport, and camera
@@ -109,6 +122,21 @@ Images stream into a `pythonlib.data_saver.DataSaver` sidecar. The main shot
 file stays closed during acquisition. `transition_to_manual` joins the thread,
 merges into `/data/<device>/camera/images`, and exposes the same data through
 `/images/<orientation or device>/<name>/<frametype>` for IMAQdx compatibility.
+After a successful shot, each frame also gets an 8-bit RGB grayscale preview at
+`/data/<device>/camera/previews/frame_0000` (and subsequent frame numbers).
+These use the same HDF5 IMAGE-class attributes as the scope screenshots so
+HDFView and compatible image viewers can render them directly. Repeated
+name/frametype exposures each get their own preview, even when their raw data
+is stored as a stack.
+
+Matching PNGs are written beside the shot in
+`<device>_png/<shot_name>_frame0000.png`. PNG export requires Pillow in the
+BLACS worker environment. Each preview independently maps its raw minimum and
+maximum to black and white; constant frames are black. The source dataset,
+frame index, exposure information, display range, and relative PNG filename
+are recorded on the preview. Raw image values and dtype are preserved. Preview
+or PNG export failures log warnings without invalidating the saved raw shot.
+
 Requested/dispatch times, camera settings, actual timings, and frame headers
 are saved with the images. Abort deletes the sidecar without merging. The
 worker restores pre-shot manual settings if it still owns control.
@@ -144,3 +172,21 @@ AEC_TEST_DATA_PORT=47551 AEC_TEST_IPC_DIR=/tmp/aec-blacs-test \
 ~/.pyenv/daq/bin/python -m pytest -q \
     python/tests/test_labscript_remote.py python/tests/test_remote_camera.py
 ```
+
+## GUI display settings (v0.3.0)
+
+Buffered shots force camera `count_convert_mode=0` to preserve raw ADU counts.
+Native GUIs connected to the same backend publish independent profiles without
+acquiring camera control. At buffered transition, the worker snapshots all known
+profiles and re-reads SDK calibration for the shot's actual readout/gain settings.
+The UTF-8 JSON datasets under `data/<device>/camera/images` are:
+
+- `gui_settings_snapshot`: GUI profiles, host/client, update time, original GUI
+  calibration, and the calibration resolved for the shot.
+- `frame_display_metadata`: one JSON record per frame, with each profile's BG
+  ROI mean/count and the derived offset/scale (raw pixels are unchanged).
+
+GUI settings are captured at execution, not compilation. Profiles are stored in
+backend memory; start/connect the GUI after a backend restart. Saved timestamps
+show when a closed or disconnected GUI last published its profile. Older
+backends record an explicit unavailable status and still acquire raw images.

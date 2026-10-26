@@ -13,6 +13,7 @@ AndorEMCCDcontroller_add_executable_std(andor_emccd_gui
     MainWindow.cc MainWindow.h
     ImageView.cc ImageView.h
     SettingsPanel.cc SettingsPanel.h
+    ConversionPanel.cc ConversionPanel.h
     AnalysisPanel.cc AnalysisPanel.h
     TrendPlot.cc TrendPlot.h
     LiveProcessor.cc LiveProcessor.h

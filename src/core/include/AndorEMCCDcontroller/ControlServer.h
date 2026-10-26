@@ -89,6 +89,7 @@ class ControlServer {
   zmq::socket_t events_;
   std::vector<PendingWait> waits_;
 
+  Json display_profiles_ = Json::object();
   ControlInfo control_;
   double control_last_seen_ = 0.0;  ///< Steady clock.
   double lease_s_ = 10.0;

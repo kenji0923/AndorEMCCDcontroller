@@ -140,7 +140,7 @@ void SettingsPanel::Build() {
            Kind::kChoice);
   AddField(readout, "preamp_gain_index", tr("Pre-amp gain"), Kind::kChoice);
   AddField(readout, "baseline_clamp", tr("Baseline clamp"), Kind::kBool);
-  AddField(readout, "count_convert_mode", tr("Count convert"), Kind::kChoice,
+  AddField(readout, "count_convert_mode", tr("SDK conversion (integer)"), Kind::kChoice,
            0, 0, 1, 0,
            tr("Converts acquired and saved pixel values through the camera SDK. "
               "On iXon, conversion requires baseline clamp, isolated crop off, "

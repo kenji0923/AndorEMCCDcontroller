@@ -83,7 +83,8 @@ endfunction()
 # Protocol: shared by the backend, the frontend and the tests.
 AndorEMCCDcontroller_add_library_std(Protocol Protocol)
 target_sources(Protocol PRIVATE
-    CameraSettings.cc include/${PROJECT_NAME}/CameraSettings.h)
+    CameraSettings.cc include/${PROJECT_NAME}/CameraSettings.h
+    DisplayConversion.cc include/${PROJECT_NAME}/DisplayConversion.h)
 target_link_libraries(Protocol PUBLIC nlohmann_json::nlohmann_json)
 
 if(AEC_BUILD_BACKEND)

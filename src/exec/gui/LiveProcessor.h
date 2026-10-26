@@ -65,6 +65,7 @@ class LiveProcessor {
   std::vector<std::string> Configure(const std::vector<Roi>& rois,
                                      const std::vector<ExpressionDef>& defs);
   void SetUdp(const UdpConfig& config);
+  void SetDisplayMetadata(const Json& metadata);
 
   /** Called on the receiver thread for every frame. */
   Frame Process(Frame frame);
@@ -99,6 +100,7 @@ class LiveProcessor {
   void SendUdp(const FrameResult& r);
 
   mutable std::mutex mutex_;
+  Json display_metadata_ = Json::object();
   std::vector<Roi> rois_;
   std::vector<ExpressionDef> defs_;
   ExpressionSet expressions_;

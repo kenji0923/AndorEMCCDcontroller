@@ -10,6 +10,7 @@
 #include <gtest/gtest.h>
 
 #include <AndorEMCCDcontroller/Analysis.h>
+#include <AndorEMCCDcontroller/DisplayConversion.h>
 #include <AndorEMCCDcontroller/Colormap.h>
 #include <AndorEMCCDcontroller/Expression.h>
 
@@ -199,4 +200,55 @@ TEST(Analysis, BackgroundMeanAndFloatDisplayDoNotModifyRaw) {
   bg.enabled = true;
   bg.x = 100;
   EXPECT_FALSE(aec::MeasureBackground(raw, {bg})["valid"].get<bool>());
+}
+
+
+TEST(DisplayConversion, FractionalNegativeValuesAndRawPreserved) {
+  const auto raw = MakeFrame();
+  aec::Json config{{"units", "photons"}, {"source", "manual"},
+                   {"sensitivity_e_per_adu", 2.0}, {"em_gain", 10.0},
+                   {"qe", 0.8}, {"baseline_adu", 1.0}};
+  auto conversion = aec::ResolveDisplayConversion(config, {}, {});
+  ASSERT_TRUE(conversion["valid"].get<bool>());
+  auto converted = aec::ConvertDisplayFrame(raw, conversion);
+  EXPECT_EQ(converted.header.pixel_type, aec::PixelType::kFloat32);
+  EXPECT_DOUBLE_EQ(aec::PixelValue(converted.header, converted.data->data(), 0, 0), -.25);
+  EXPECT_DOUBLE_EQ(aec::PixelValue(converted.header, converted.data->data(), 2, 0), .25);
+  EXPECT_DOUBLE_EQ(aec::PixelValue(raw.header, raw.data->data(), 2, 0), 2);
+  config["background_subtract_enabled"] = true;
+  conversion = aec::ResolveDisplayConversion(config, {}, {}, {{"valid", true}, {"mean", .5}});
+  converted = aec::ConvertDisplayFrame(raw, conversion);
+  EXPECT_DOUBLE_EQ(aec::PixelValue(converted.header, converted.data->data(), 2, 0), .375);
+}
+
+TEST(DisplayConversion, RejectsMissingCalibrationAndDoubleConversion) {
+  aec::Json config{{"units", "photons"}, {"source", "camera"}, {"wavelength_nm", 780.0}};
+  EXPECT_FALSE(aec::ResolveDisplayConversion(config, {}, {})["valid"].get<bool>());
+  config["source"] = "manual";
+  config["sensitivity_e_per_adu"] = 2.0;
+  config["em_gain"] = 10.0;
+  config["qe"] = .8;
+  config["baseline_adu"] = 100.0;
+  EXPECT_FALSE(aec::ResolveDisplayConversion(config, {}, {{"count_convert_mode", 2}})["valid"].get<bool>());
+  for (const auto& entry : std::vector<std::pair<std::string, double>>{
+           {"em_gain", 0}, {"sensitivity_e_per_adu", -1}, {"qe", 1.1}}) {
+    auto invalid = config;
+    invalid[entry.first] = entry.second;
+    EXPECT_FALSE(aec::ResolveDisplayConversion(invalid, {}, {})["valid"].get<bool>());
+  }
+  config["background_subtract_enabled"] = true;
+  EXPECT_FALSE(aec::ResolveDisplayConversion(config, {}, {})["valid"].get<bool>());
+}
+
+TEST(DisplayConversion, RejectsCalibrationFromDifferentReadout) {
+  aec::Json settings{{"output_amplifier", 0}, {"hs_speed_index", 0},
+                     {"preamp_gain_index", 1}, {"em_gain_mode", 3},
+                     {"em_gain_enabled", true}, {"em_gain", 20}, {"baseline_clamp", true}};
+  aec::Json calibration{{"settings", settings}, {"sensitivity_e_per_adu", 2},
+                        {"em_gain", 20}, {"qe", .8}, {"baseline_adu", 100},
+                        {"wavelength_nm", 780}};
+  const aec::Json config{{"units", "photons"}, {"source", "camera"}, {"wavelength_nm", 780}};
+  EXPECT_TRUE(aec::ResolveDisplayConversion(config, calibration, settings)["valid"].get<bool>());
+  settings["preamp_gain_index"] = 2;
+  EXPECT_FALSE(aec::ResolveDisplayConversion(config, calibration, settings)["valid"].get<bool>());
 }

@@ -16,6 +16,8 @@ from unittest.mock import MagicMock
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
+import numpy as np
+from PIL import Image
 
 # Import the installed package before exposing this repository's source folder.
 pytest.importorskip("labscript_devices")
@@ -28,10 +30,10 @@ sys.path.insert(0, str(_PYTHON / "labscript_devices"))
 
 from AndorEMCCDRemote.timing import validate_start_time
 from AndorEMCCDRemote.labscript_devices import AndorEMCCDRemote
-from AndorEMCCDRemote.blacs_workers import AndorEMCCDRemoteWorker
+from AndorEMCCDRemote.blacs_workers import AndorEMCCDRemoteWorker, _save_shot_previews
 from AndorEMCCDRemote.shot_start import ShotStartBridge
 from andor_emccd import AndorEMCCDClient, ControlDeniedError
-from labscript import labscript_init, labscript_cleanup, start, stop, compiler
+from labscript import labscript_init, labscript_cleanup, start, stop, wait
 from labscript_devices.DummyPseudoclock.labscript_devices import DummyPseudoclock
 
 
@@ -47,7 +49,7 @@ def test_invalid_start_grid(value):
         validate_start_time(value)
 
 
-def compile_shot(path, times=(.1, .2), exposure=.001):
+def compile_shot(path, times=(.1, .2), exposure=.001, with_wait=False):
     labscript_init(str(path), labscript_file=__file__, new=True, overwrite=True)
     try:
         DummyPseudoclock("clock")
@@ -55,6 +57,8 @@ def compile_shot(path, times=(.1, .2), exposure=.001):
             camera_attributes={"hbin": 4, "vbin": 4, "exposure_time_s": exposure},
             stop_acquisition_timeout=1.0)
         start()
+        if with_wait:
+            wait("hardware_pause", .15, timeout=60)
         for i, t in enumerate(times):
             camera.expose(t, "fluorescence", frametype=f"frame{i}")
         stop(max(times, default=0) + .2)
@@ -78,7 +82,7 @@ def test_compile_rejects_fine_start(tmp_path):
         compile_shot(tmp_path / "bad.h5", (.10001,))
 
 
-def test_compile_rejects_duration_changes_and_waits(tmp_path):
+def test_compile_rejects_duration_changes(tmp_path):
     labscript_init(str(tmp_path / "bad.h5"), labscript_file=__file__, new=True)
     try:
         DummyPseudoclock("clock")
@@ -87,12 +91,17 @@ def test_compile_rejects_duration_changes_and_waits(tmp_path):
         camera.expose(.1, "atoms", exposure_time=.001)
         with pytest.raises(ValueError, match="same exposure_time"):
             camera.expose(.2, "background", exposure_time=.002)
-        compiler.wait_table[.15] = ("wait", 1)
-        with h5py.File(tmp_path / "validation.h5", "w") as file:
-            with pytest.raises(ValueError, match="waits"):
-                camera.generate_code(file)
     finally:
         labscript_cleanup()
+
+
+def test_compile_ignores_wait_without_changing_exposure_times(tmp_path):
+    path = compile_shot(tmp_path / "wait.h5", with_wait=True)
+    with h5py.File(path) as file:
+        assert len(file["waits"]) == 1
+        group = file["devices/emccd"]
+        assert group.attrs["wait_policy"] == "ignore"
+        assert list(group["EXPOSURES"]["t"]) == [.1, .2]
 
 
 class StartEvent:
@@ -136,25 +145,25 @@ def worker(monkeypatch):
     finally:
         client.close()
     monkeypatch.setattr("labscript_utils.ls_zprocess.Event", StartEvent)
-    monkeypatch.setattr("labscript_utils.ls_zprocess.Context", MagicMock())
     monkeypatch.setattr("pythonlib.online_monitor.status.StatusMetrics", MagicMock())
     worker = object.__new__(AndorEMCCDRemoteWorker)
     worker.__dict__.update(kwargs, device_name="emccd", mock=False,
         force_control=False, camera_attributes={}, manual_mode_camera_attributes={},
-        orientation="side", image_receiver_port=1, parent_host="localhost",
+        orientation="side",
         logger=logging.getLogger("camera-test"))
     worker.init()
-    worker._send_image_to_parent = MagicMock()
     yield worker
     worker.shutdown()
 
 
 def test_worker_startup_does_not_connect(worker):
     assert worker.camera is None
+    assert not hasattr(worker, "image_socket")
 
 
-def test_shot_waits_for_start_saves_and_restores(worker, tmp_path):
-    path = compile_shot(tmp_path / "shot.h5")
+@pytest.mark.parametrize("with_wait", [False, True])
+def test_shot_waits_for_start_saves_and_restores(worker, tmp_path, with_wait):
+    path = compile_shot(tmp_path / "shot.h5", with_wait=with_wait)
     worker.connect_to_device()
     original = worker.camera._client.get_settings()
     worker.prepare_shot_start("attempt")
@@ -167,11 +176,89 @@ def test_shot_waits_for_start_saves_and_restores(worker, tmp_path):
     assert worker.camera._client.get_settings() == original
     with h5py.File(path) as file:
         assert file["images/side/fluorescence/frame0"].shape == (128, 128)
+        saved = file["data/emccd/camera/images"]
+        assert saved.attrs["wait_policy"] == "ignore"
+        requested = saved["requested_start_times_s"][:]
+        sent = saved["trigger_sent_times_s"][:]
+        acknowledged = saved["trigger_ack_times_s"][:]
+        assert len(sent) == len(acknowledged) == len(requested) == 2
+        assert all(acknowledged >= sent)
+        assert all(abs(sent - requested) < .1)
+        assert saved.attrs["trigger_clock"] == time.get_clock_info("perf_counter").implementation
+        assert saved.attrs["start_received_perf_counter_s"] > 0
         assert file["images/side/fluorescence/frame1"].shape == (128, 128)
         sent = file["data/emccd/camera/images/trigger_sent_times_s"][:]
         assert len(sent) == 2 and all(sent >= [.1, .2])
         assert not file["images/side"].attrs["failed_shot"]
+        for index in range(2):
+            preview = file[f"data/emccd/camera/previews/frame_{index:04d}"]
+            assert preview.shape == (128, 128, 3)
+            assert preview.dtype == np.uint8
+            assert preview.attrs["CLASS"] == b"IMAGE"
+            assert preview.attrs["IMAGE_SUBCLASS"] == b"IMAGE_TRUECOLOR"
+            assert preview.attrs["INTERLACE_MODE"] == b"INTERLACE_PIXEL"
+            png = tmp_path / preview.attrs["png_file"]
+            with Image.open(png) as image:
+                np.testing.assert_array_equal(np.asarray(image), preview[:])
+            assert file[preview.attrs["source_dataset"]].dtype == np.uint16
     assert not Path(str(path) + ".tmp").exists()
+
+
+def test_preview_repeated_frames_preserves_raw_and_handles_constant_image(tmp_path):
+    raw = np.array([[[0, 100], [200, 65535]], [[42, 42], [42, 42]]], dtype=np.uint16)
+    exposures = [dict(name="atoms", frametype="frame", t=t, exposure_time_s=.001)
+                 for t in (.1, .2)]
+    path = tmp_path / "shot.h5"
+    with h5py.File(path, "w") as file:
+        source = file.create_dataset("data/emccd/camera/images/atoms/frame", data=raw)
+        _save_shot_previews(file, "emccd", exposures, path, logging.getLogger("test"))
+        np.testing.assert_array_equal(source[:], raw)
+        previews = file["data/emccd/camera/previews"]
+        assert len(previews) == 2
+        first, second = previews["frame_0000"], previews["frame_0001"]
+        assert first[0, 0, 0] == 0 and first[1, 1, 0] == 255
+        assert not second[:].any()
+        assert second.attrs["display_min"] == second.attrs["display_max"] == 42
+        assert second.attrs["source_frame_index"] == 1
+        for preview in (first, second):
+            with Image.open(tmp_path / preview.attrs["png_file"]) as png:
+                np.testing.assert_array_equal(np.asarray(png), preview[:])
+
+
+def test_png_failure_keeps_hdf5_previews_and_raw(tmp_path):
+    path = tmp_path / "shot.h5"
+    (tmp_path / "emccd_png").write_text("directory cannot be created here")
+    exposures = [dict(name="atoms", frametype="frame", t=.1, exposure_time_s=.001)]
+    logger = MagicMock()
+    with h5py.File(path, "w") as file:
+        raw = np.array([[10, 20]], dtype=np.uint16)
+        source = file.create_dataset("data/emccd/camera/images/atoms/frame", data=raw)
+        _save_shot_previews(file, "emccd", exposures, path, logger)
+        np.testing.assert_array_equal(source[:], raw)
+        assert file["data/emccd/camera/previews/frame_0000"].shape == (1, 2, 3)
+        logger.warning.assert_called_once()
+
+
+def test_repeated_name_shot_exports_each_frame(worker, tmp_path):
+    path = compile_shot(tmp_path / "shot.h5")
+    with h5py.File(path, "r+") as file:
+        table = file["devices/emccd/EXPOSURES"]
+        rows = table[:]
+        rows[1]["frametype"] = rows[0]["frametype"]
+        table[:] = rows
+    worker.prepare_shot_start("repeated")
+    worker.transition_to_buffered("emccd", str(path), {}, False)
+    worker._start_event.post("repeated")
+    assert worker.transition_to_manual()
+    with h5py.File(path) as file:
+        assert file["images/side/fluorescence/frame0"].shape == (2, 128, 128)
+        previews = file["data/emccd/camera/previews"]
+        assert len(previews) == 2
+        for i in range(2):
+            preview = previews[f"frame_{i:04d}"]
+            assert preview.attrs["source_frame_index"] == i
+            with Image.open(tmp_path / preview.attrs["png_file"]) as png:
+                np.testing.assert_array_equal(np.asarray(png), preview[:])
 
 
 def test_runtime_rejects_old_or_modified_shot_before_start(worker, tmp_path):
@@ -240,6 +327,7 @@ def test_abort_cancels_pending_triggers_and_cleans_sidecar(worker, tmp_path, sta
     assert not Path(str(path) + ".tmp").exists()
     with h5py.File(path) as file:
         assert "images" not in file or "side" not in file["images"]
+    assert not (tmp_path / "emccd_png").exists()
 
 
 def test_trigger_error_is_reported_and_not_saved(worker, tmp_path, monkeypatch):
@@ -306,12 +394,13 @@ def test_tab_builds_with_standard_inputs_and_persistence(monkeypatch, tmp_path):
     from blacs.device_base_class import DeviceTab
     from AndorEMCCDRemote.blacs_tabs import AndorEMCCDRemoteTab
     monkeypatch.setattr(DeviceTab, "__init__", lambda self: None)
-    monkeypatch.setattr("labscript_devices.IMAQdxCamera.blacs_tabs.ImageReceiver", MagicMock())
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     tab = AndorEMCCDRemoteTab()
     tab._device_name = "emccd"
     tab.settings = {"connection_table": SimpleNamespace(
-        find_by_name=lambda _: SimpleNamespace(properties={})), "front_panel_settings": {}}
+        find_by_name=lambda _: SimpleNamespace(properties={})), "front_panel_settings": {
+            "~display/intensity_min": {"base_value": 100},
+            "~preview/max_rate_hz": {"base_value": 10}}}
     widget = QtWidgets.QWidget()
     layout = QtWidgets.QVBoxLayout(widget)
     tab.get_tab_layout = lambda: layout
@@ -319,6 +408,10 @@ def test_tab_builds_with_standard_inputs_and_persistence(monkeypatch, tmp_path):
     tab.statemachine_timeout_add = MagicMock()
     tab.event_queue = MagicMock()
     tab.initialise_GUI()
+    assert not hasattr(tab, "image")
+    assert not hasattr(tab, "image_receiver")
+    assert not any(key.startswith(("~display/", "~preview/"))
+                   for key in tab.settings["front_panel_settings"])
     tab.primary_worker = "main_worker"
     # BLACS calls next() once outside its StopIteration handler. A timer state
     # must therefore yield even before Connect has been pressed.
@@ -337,7 +430,8 @@ def test_tab_builds_with_standard_inputs_and_persistence(monkeypatch, tmp_path):
     with pytest.raises(StopIteration):
         state.send({"connected": False})
     assert not tab.buttons["request"].isEnabled()
-    tab.restore_save_data({"camera_panel": {}, "connection_connected": True})
+    tab.restore_save_data({"camera_panel": {}, "connection_connected": True,
+                           "acquiring": True, "colormap": "legacy", "max_rate": 20})
     assert tab.event_queue.put.called
     widget.resize(1000, 900)
     widget.show()
@@ -353,7 +447,6 @@ def test_tab_builds_with_standard_inputs_and_persistence(monkeypatch, tmp_path):
     tab._show_panel(dict(connected=True, mine=True, control={"holder": "BLACS:emccd"},
                          settings={"em_gain": 50}, info={}, status={}))
     assert tab.panel.fields["em_gain"].isEnabled()
-    assert tab.ui.pushButton_snap.isEnabled()
     assert not tab.buttons["take_control"].isEnabled()
     widget.grab().save(str(tmp_path / "blacs-tab.png"))
     widget.close()
@@ -389,3 +482,50 @@ def test_panel_new_commit_supersedes_inflight_value(panel):
     assert panel.value("em_gain") == 30
     panel.readback({"em_gain": 30}, {})
     assert not panel.confirming
+
+
+def test_display_metadata_preserves_fractional_bg_and_raw():
+    from AndorEMCCDRemote.display_metadata import frame_display_metadata
+    raw = np.array([[100, 101], [102, 103]], dtype=np.uint16)
+    config = dict(units="photons", source="manual", sensitivity_e_per_adu=2,
+                  em_gain=10, qe=.8, baseline_adu=100, background_subtract_enabled=True)
+    snapshot = {"profiles": {"gui": {"profile": {
+        "display": {"conversion": config},
+        "analysis": {"rois": [dict(x=0, y=0, width=2, height=1,
+                                   enabled=True, background=True)]}}}}}
+    before = raw.copy()
+    metadata = frame_display_metadata(raw, snapshot)["gui"]
+    assert metadata["background"]["mean"] == 100.5
+    assert metadata["conversion"]["offset"] == 100.5  # no second bias subtraction
+    assert metadata["conversion"]["scale"] == .25
+    np.testing.assert_array_equal(before, raw)
+
+
+def test_shot_snapshots_remote_gui_and_actual_shot_calibration(worker, tmp_path):
+    import json
+    worker.connect_to_device()
+    client = worker.camera._client
+    client.request("set_display_profile", {"profile_id": "test-remote-gen0", "profile": {
+        "host": "gen0", "display": {"conversion": dict(units="electrons", source="camera",
+            wavelength_nm=780, background_subtract_enabled=True)},
+        "analysis": {"rois": [dict(x=0, y=0, width=2, height=2,
+                                   enabled=True, background=True)]},
+        "calibration": {"em_gain": 9999}}})
+    path = compile_shot(tmp_path / "display.h5")
+    worker.prepare_shot_start("display-test")
+    worker.transition_to_buffered("emccd", str(path), {}, False)
+    worker._start_event.post("display-test")
+    assert worker.transition_to_manual()
+    with h5py.File(path) as file:
+        data = file["data/emccd/camera/images"]
+        profiles = json.loads(data["gui_settings_snapshot"][()])["profiles"]
+        assert profiles["test-remote-gen0"]["profile"]["host"] == "gen0"
+        assert profiles["test-remote-gen0"]["shot_calibration"]["em_gain"] != 9999
+        frames = data["frame_display_metadata"][:]
+        assert len(frames) == 2
+        metadata = json.loads(frames[0])["test-remote-gen0"]
+        raw = data["fluorescence/frame0"][:]
+        assert raw.dtype == np.uint16
+        assert metadata["background"]["mean"] == float(raw[:2, :2].mean())
+        assert metadata["conversion"]["valid"]
+        assert json.loads(data.attrs["camera_settings"])["count_convert_mode"] == 0

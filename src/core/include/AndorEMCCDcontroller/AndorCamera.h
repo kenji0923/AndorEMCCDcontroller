@@ -42,6 +42,7 @@ class AndorCamera : public Camera {
   bool SendSoftwareTrigger(std::string* error) override;
   TemperatureReading ReadTemperature() override;
   Timings GetTimings() override;
+  Json GetCalibration(double wavelength_nm) override;
 
  private:
   void QueryInfo();
@@ -52,6 +53,8 @@ class AndorCamera : public Camera {
   bool open_ = false;
   CameraInfo info_;
   CameraSettings settings_;
+  Json sensitivity_ = nullptr;
+  unsigned int sensitivity_status_ = 0;
   FrameGeometry geometry_;
   Timings timings_;
   std::atomic<bool> acquiring_{false};

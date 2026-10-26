@@ -154,6 +154,12 @@ TEST(Backend, ArmWaitFetchAndLiveStream) {
   client.SetIdentity("tester", "");
   EXPECT_TRUE(client.Request("ping")["simulated"].get<bool>());
   EXPECT_EQ(client.Request("ping")["version"], AEC_VERSION);
+  // Display profiles and calibration do not acquire camera control.
+  const auto calibration = client.Request("get_calibration", {{"wavelength_nm", 780}});
+  EXPECT_EQ(calibration["qe"], .8);
+  EXPECT_TRUE(client.Request("set_display_profile", {{"profile_id", "gen0"},
+      {"profile", {{"units", "photons"}}}})["stored"].get<bool>());
+  EXPECT_EQ(client.Request("get_display_profiles")["gen0"]["profile"]["units"], "photons");
   // Mutating commands need the control right.
   try {
     client.Request("stop");

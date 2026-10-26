@@ -465,6 +465,12 @@ std::vector<std::string> AndorCamera::ApplyAcquisitionSettings(
   }
   geometry_ = ComputeGeometry(*s, info.sensor_width, info.sensor_height);
   settings_ = *s;
+  // GetSensitivity may reject calls during acquisition; cache it while idle.
+  float sensitivity = 0.0f;
+  sensitivity_status_ = GetSensitivity(0, s->hs_speed_index,
+      s->output_amplifier, s->preamp_gain_index, &sensitivity);
+  sensitivity_ = sensitivity_status_ == DRV_SUCCESS && sensitivity > 0
+                     ? Json(sensitivity) : Json(nullptr);
 
   const unsigned int trigger_rc =
       IsTriggerModeAvailable(static_cast<int>(s->trigger_mode));
@@ -695,6 +701,38 @@ Timings AndorCamera::GetTimings() { return timings_; }
 
 std::unique_ptr<Camera> MakeAndorCamera(const std::string& config_dir) {
   return std::make_unique<AndorCamera>(config_dir);
+}
+
+Json AndorCamera::GetCalibration(double wavelength_nm) {
+  Json result{{"source", "Andor SDK2"}, {"settings", settings_},
+              {"wavelength_nm", wavelength_nm},
+              {"sensitivity_e_per_adu", sensitivity_},
+              {"sensitivity_status", sensitivity_status_},
+              {"sensitivity_source", "GetSensitivity (AD channel 0)"},
+              {"em_gain", nullptr}, {"qe", nullptr}, {"baseline_adu", nullptr}};
+  std::string sensor = info_.head_model;
+  float qe = 0.0f;
+  const auto rc = GetQE(sensor.data(), static_cast<float>(wavelength_nm), 0, &qe);
+  result["qe_status"] = rc;
+  result["qe_source"] = "GetQE, sensor model, mode 0";
+  if (rc == DRV_SUCCESS && qe > 0 && qe <= 100) result["qe"] = qe / 100.0;
+  if (settings_.output_amplifier != 0) {
+    result["em_gain"] = 1.0;
+    result["em_gain_source"] = "conventional output, no EM multiplication";
+  } else if (!settings_.em_gain_enabled) {
+    result["em_gain"] = 1.0;
+    result["em_gain_source"] = "nominal unity at minimum setting; not measured";
+  } else if (settings_.em_gain_mode == 3) {
+    result["em_gain"] = settings_.em_gain;
+    result["em_gain_source"] = "RealGain set point; not independently measured";
+  } else {
+    result["em_gain_source"] = "physical gain unavailable in DAC/linear modes";
+  }
+  if (settings_.baseline_clamp) {
+    result["baseline_adu"] = 100.0;
+    result["baseline_source"] = "nominal iXon clamp offset; use ROI for measured bias";
+  }
+  return result;
 }
 
 }  // namespace AndorEMCCDcontroller

@@ -11,6 +11,7 @@
 #include <cstring>
 
 #include "UdpSender.h"
+#include <AndorEMCCDcontroller/DisplayConversion.h>
 
 namespace AndorEMCCDcontroller {
 
@@ -62,12 +63,25 @@ void LiveProcessor::SetUdp(const UdpConfig& config) {
   udp_dirty_ = true;  // Resolved on the receiver thread at the next frame.
 }
 
+void LiveProcessor::SetDisplayMetadata(const Json& metadata) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  display_metadata_ = metadata;
+}
+
 Frame LiveProcessor::Process(Frame frame) {
   auto result = std::make_shared<FrameResult>();
   result->receive_time = UnixTimeNow();
 
   std::lock_guard<std::mutex> lock(mutex_);
   frame.analysis["background"] = MeasureBackground(frame, rois_);
+  frame.analysis["gui_settings"] = display_metadata_;
+  const Json display = display_metadata_.value("display", Json::object());
+  frame.analysis["display_conversion"] = ResolveDisplayConversion(
+      display.value("conversion", Json::object()),
+      display_metadata_.value("calibration", Json::object()),
+      frame.header.camera_settings.empty()
+          ? display_metadata_.value("settings", Json::object())
+          : frame.header.camera_settings, frame.analysis["background"]);
   result->frame = frame;  // Shares the unmodified raw payload.
   std::vector<double> inputs;
   for (const auto& roi : rois_) {

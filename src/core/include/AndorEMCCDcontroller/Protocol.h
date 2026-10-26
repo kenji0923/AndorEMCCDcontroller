@@ -70,6 +70,8 @@ struct FrameHeader {
   double camera_time_s = -1.0;  ///< Time from run start (metadata), <0 n/a.
   double temperature_c = 0.0;
 
+  Json camera_settings = Json::object();  ///< Actual settings for this frame.
+
   std::size_t PayloadBytes() const;
 };
 

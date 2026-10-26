@@ -446,4 +446,12 @@ std::unique_ptr<Camera> MakeSimulatedCamera() {
   return std::make_unique<SimCamera>();
 }
 
+Json SimCamera::GetCalibration(double wavelength_nm) {
+  return Json{{"source", "simulator example coefficients (not hardware calibration)"},
+              {"settings", settings_}, {"wavelength_nm", wavelength_nm},
+              {"sensitivity_e_per_adu", 2.0}, {"qe", 0.8},
+              {"baseline_adu", 100.0},
+              {"em_gain", settings_.em_gain_enabled ? std::max(1, settings_.em_gain) : 1}};
+}
+
 }  // namespace AndorEMCCDcontroller

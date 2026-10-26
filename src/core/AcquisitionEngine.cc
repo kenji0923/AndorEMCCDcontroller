@@ -174,6 +174,14 @@ Json AcquisitionEngine::GetSettings() {
   return Call([this] { return Json(settings_); });
 }
 
+Json AcquisitionEngine::GetCalibration(double wavelength_nm) {
+  if (!(wavelength_nm >= 100.0 && wavelength_nm <= 2000.0))
+    throw std::runtime_error("wavelength_nm must be 100..2000");
+  return Call([this, wavelength_nm] {
+    return camera_->GetCalibration(wavelength_nm);
+  });
+}
+
 Json AcquisitionEngine::SetSettings(const Json& patch) {
   return Call([this, patch] { return DoSetSettings(patch); });
 }
@@ -495,6 +503,7 @@ void AcquisitionEngine::DrainFrames() {
     h.em_gain = EffectiveEmGain(settings_);
     h.timestamp = now;
     h.temperature_c = temperature_.temperature_c;
+    h.camera_settings = settings_;
     PublishFrame(frame);
     store_.Append(std::move(frame));
   }

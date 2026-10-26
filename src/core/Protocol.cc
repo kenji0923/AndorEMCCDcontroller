@@ -53,6 +53,7 @@ void to_json(Json& j, const FrameHeader& h) {
            {"em_gain", h.em_gain},
            {"timestamp", h.timestamp},
            {"temperature_c", h.temperature_c}};
+  if (!h.camera_settings.empty()) j["camera_settings"] = h.camera_settings;
   if (h.camera_time_s >= 0.0) {
     j["camera_time_s"] = h.camera_time_s;
   } else {
@@ -75,6 +76,7 @@ void from_json(const Json& j, FrameHeader& h) {
   h.em_gain = j.value("em_gain", 0);
   h.timestamp = j.value("timestamp", 0.0);
   h.temperature_c = j.value("temperature_c", 0.0);
+  h.camera_settings = j.value("camera_settings", Json::object());
   const auto it = j.find("camera_time_s");
   h.camera_time_s =
       (it != j.end() && it->is_number()) ? it->get<double>() : -1.0;

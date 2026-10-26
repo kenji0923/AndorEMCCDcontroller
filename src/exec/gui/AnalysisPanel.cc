@@ -557,6 +557,12 @@ void TrendPanel::ApplyScale() {
   plot_->SetFixedRange(fixed_->isChecked(), lo_->value(), hi_->value());
 }
 
+Json TrendPanel::ToJson() const {
+  return Json{{"selected", Selected()}, {"window_s", window_s_->value()},
+              {"normalize", normalize_->isChecked()}, {"fixed", fixed_->isChecked()},
+              {"lo", lo_->value()}, {"hi", hi_->value()}};
+}
+
 void TrendPanel::SaveState(QSettings* s) const {
   s->setValue("trend/window_s", window_s_->value());
   s->setValue("trend/normalize", normalize_->isChecked());

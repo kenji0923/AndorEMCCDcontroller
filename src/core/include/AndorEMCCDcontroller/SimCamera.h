@@ -43,6 +43,7 @@ class SimCamera : public Camera {
   bool SendSoftwareTrigger(std::string* error) override;
   TemperatureReading ReadTemperature() override;
   Timings GetTimings() override;
+  Json GetCalibration(double wavelength_nm) override;
 
  private:
   using Clock = std::chrono::steady_clock;

@@ -1,4 +1,4 @@
-"""FanLab BLACS controls and image viewer for the remote iXon backend."""
+"""FanLab BLACS settings and shot controls for the remote iXon backend."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import labscript_utils.h5_lock  # noqa: F401 (must precede h5py)
 import h5py
 import labscript_utils.properties
 from blacs.tab_base_classes import define_state, MODE_MANUAL
-from labscript_devices.IMAQdxCamera.blacs_tabs import IMAQdxCameraTab
+from blacs.device_base_class import DeviceTab
 from qtutils.qt import QtWidgets
 from user_devices.fanlab_devices.utils.front_panel_persistence import FrontPanelPersistence
 
@@ -18,12 +18,12 @@ from .shot_start import register_shot
 _PACKAGE = __name__.rsplit(".", 1)[0]
 
 
-class AndorEMCCDRemoteTab(IMAQdxCameraTab):
+class AndorEMCCDRemoteTab(DeviceTab):
     worker_class = f"{_PACKAGE}.blacs_workers.AndorEMCCDRemoteWorker"
-    use_smart_programming = False
 
     def initialise_GUI(self):
-        super().initialise_GUI()
+        self.supports_smart_programming(False)
+        self.supports_remote_value_check(False)
         self._connected = False
         self._pending_settings = {}
         self._draining = False
@@ -34,7 +34,6 @@ class AndorEMCCDRemoteTab(IMAQdxCameraTab):
         self._fp = FrontPanelPersistence(self)
         self.panel = SettingsPanel(self._fp, properties)
         self.panel.committed.connect(self.submit_settings)
-        self._fp.bind_spinbox("preview/max_rate_hz", self.ui.doubleSpinBox_maxrate)
         self._fp.finalise()
         controls = QtWidgets.QWidget()
         row = QtWidgets.QHBoxLayout(controls)
@@ -51,8 +50,8 @@ class AndorEMCCDRemoteTab(IMAQdxCameraTab):
             "Take settings/acquisition control from the displayed holder. "
             "The previous client loses control.")
         layout = self.get_tab_layout()
-        layout.insertWidget(0, self.panel)
-        layout.insertWidget(0, controls)
+        layout.addWidget(controls)
+        layout.addWidget(self.panel)
         self._show_panel({"connected": False})
         self.statemachine_timeout_add(properties.get("poll_interval_ms", 100), self.poll_backend)
 
@@ -65,7 +64,6 @@ class AndorEMCCDRemoteTab(IMAQdxCameraTab):
             "serial_number", "orientation", "manual_mode_camera_attributes", "mock",
             "host", "control_port", "data_port", "ipc_dir")}
         kwargs.update(camera_attributes=device_properties["camera_attributes"],
-                      image_receiver_port=self.image_receiver.port,
                       force_control=properties.get("force_control", False))
         self.create_worker("main_worker", self.worker_class, kwargs)
         self.primary_worker = "main_worker"
@@ -78,7 +76,6 @@ class AndorEMCCDRemoteTab(IMAQdxCameraTab):
 
     def restore_save_data(self, data):
         # Restoring values/connection must not acquire control or start the camera.
-        super().restore_save_data({**data, "acquiring": False})
         self.panel.restore(data.get("camera_panel", {}))
         self._fp.restore_save_data(data)
         if data.get("connection_connected", False):
@@ -92,8 +89,6 @@ class AndorEMCCDRemoteTab(IMAQdxCameraTab):
         if not result or "error" in result:
             self._read_error = (result or {}).get("error", "Backend request failed")
             self.panel.set_editable(False)
-            self.ui.pushButton_snap.setEnabled(False)
-            self.ui.pushButton_continuous.setEnabled(False)
             age = time.monotonic() - self._last_read if self._last_read else 0
             self.panel.update_banner(f"Backend error ({age:.0f} s since readback): {self._read_error}")
             return
@@ -109,10 +104,7 @@ class AndorEMCCDRemoteTab(IMAQdxCameraTab):
         self.buttons["request"].setEnabled(self._connected and not mine)
         self.buttons["take_control"].setEnabled(self._connected and bool(control) and not mine)
         self.buttons["release"].setEnabled(mine)
-        self.panel.set_editable(mine and not self.acquiring)
-        self.ui.pushButton_snap.setEnabled(mine and not self.acquiring)
-        self.ui.pushButton_continuous.setEnabled(mine)
-        self.ui.pushButton_attributes.setEnabled(self._connected and not self.acquiring)
+        self.panel.set_editable(mine)
         if not self._connected:
             self.panel.update_banner("Disconnected")
             return
@@ -134,10 +126,6 @@ class AndorEMCCDRemoteTab(IMAQdxCameraTab):
     def control_action(self, action):
         self._action_error = ""
         result = yield self.queue_work(self.primary_worker, "panel_action", action)
-        if action in ("disconnect", "release") and "error" not in result and self.acquiring:
-            self.acquiring = False
-            self.ui.pushButton_stop.hide()
-            self.ui.pushButton_continuous.show()
         self._show_panel(result)
 
     @define_state(MODE_MANUAL, queue_state_indefinitely=False, delete_stale_states=True)

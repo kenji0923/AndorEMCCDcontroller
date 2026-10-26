@@ -82,13 +82,12 @@ class AndorEMCCDRemote(IMAQdxCamera):
         return float(exposure_time)
 
     def generate_code(self, hdf5_file):
-        if compiler.wait_table and self.exposures:
-            raise ValueError("Software-triggered camera shots do not support labscript waits")
         stop_time = compiler.master_pseudoclock.stop_time
         rows = validate_exposures(self.exposures, self.minimum_recovery_time, stop_time)
         group = self.init_device_group(hdf5_file)
         group.attrs["stop_time"] = stop_time
         group.attrs["trigger_method"] = "software"
+        group.attrs["wait_policy"] = "ignore"
         dtype = [("t", float), ("name", h5py.string_dtype()),
                  ("frametype", h5py.string_dtype()), ("exposure_time_s", float)]
         if rows:

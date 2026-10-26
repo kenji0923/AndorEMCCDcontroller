@@ -35,6 +35,8 @@
 #include <QPushButton>
 #include <QFileInfo>
 #include <QSettings>
+#include <QSysInfo>
+#include <QUuid>
 #include <QSpinBox>
 #include <QStatusBar>
 #include <QToolBar>
@@ -43,6 +45,8 @@
 #include <AndorEMCCDcontroller/ImageIO.h>
 
 #include "AnalysisPanel.h"
+#include "ConversionPanel.h"
+#include <AndorEMCCDcontroller/DisplayConversion.h>
 #include "ImageView.h"
 #include "SettingsPanel.h"
 
@@ -93,6 +97,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
   render_timer_.setTimerType(Qt::PreciseTimer);
   render_timer_.start(kRenderIntervalMs);
   connect(&slow_timer_, &QTimer::timeout, this, [this] {
+    RefreshDisplayMetadata();
     trend_panel_->Refresh(processor_);
     UpdateStreamRecordingStatus();
     // Keep the control lease alive (the backend frees it after ~10 s).
@@ -192,6 +197,20 @@ void MainWindow::BuildUi() {
           &MainWindow::ApplySettings);
   connect(settings_panel_, &SettingsPanel::ReloadRequested, this,
           &MainWindow::ReloadSettings);
+
+  conversion_panel_ = new ConversionPanel(this);
+  auto* conversion_dock = new QDockWidget(tr("Display conversion"), this);
+  conversion_dock->setObjectName("conversion_dock");
+  conversion_dock->setWidget(conversion_panel_);
+  addDockWidget(Qt::RightDockWidgetArea, conversion_dock);
+  tabifyDockWidget(settings_dock, conversion_dock);
+  menuBar()->actions().front()->menu()->addAction(conversion_dock->toggleViewAction());
+  connect(conversion_panel_, &ConversionPanel::Changed, this, [this] {
+    calibration_dirty_ = true;
+    last_rendered_seq_ = UINT64_MAX;
+  });
+  tb->addAction(tr("Save converted…"), this, &MainWindow::SaveConvertedFrame)
+      ->setToolTip(tr("Save displayed values as float32 TIFF, FITS or NPY"));
 
   // Analysis dock.
   analysis_panel_ = new AnalysisPanel(this);
@@ -628,7 +647,10 @@ void MainWindow::ConnectTo(const ServerAddress& address) {
       address.buffer_frames, control_ep);
   subscriber_->Start();
   last_status_time_ = UnixTimeNow();
+  profile_supported_ = true;
+  profile_sent_at_ = 0;
   ReloadSettings();
+  RefreshDisplayMetadata();
   Json control;
   if (Request("get_control", Json::object(), &control)) UpdateControl(control);
   statusBar()->showMessage(
@@ -671,6 +693,7 @@ void MainWindow::ReloadSettings() {
     settings_panel_->SetSettings(settings);
   }
   UpdateEmGain();
+  calibration_dirty_ = true;
 }
 
 void MainWindow::ApplySettings(const Json& patch) {
@@ -681,6 +704,7 @@ void MainWindow::ApplySettings(const Json& patch) {
   Json result;
   if (!Request("set_settings", {{"settings", patch}}, &result)) return;
   settings_ = result["settings"];
+  calibration_dirty_ = true;
   // EM gain range etc. depend on the applied settings.
   Json info;
   if (Request("get_info", Json::object(), &info)) {
@@ -900,6 +924,12 @@ void MainWindow::RenderLatest() {
                                   latest->frame.header.seq)
       : latest->frame;
   if (!display.data) return;
+  if (!display.header.camera_settings.empty() &&
+      display.header.camera_settings != settings_) {
+    settings_ = display.header.camera_settings;
+    calibration_dirty_ = true;
+  }
+  if (calibration_dirty_) RefreshCalibration();
   const Json background = MeasureBackground(display, analysis_panel_->Rois());
   display.analysis["background"] = background;
   const bool valid_background = background.value("valid", false);
@@ -908,9 +938,12 @@ void MainWindow::RenderLatest() {
                              .arg(background["mean"].get<double>(), 0, 'g', 8)
                              .arg(background["count"].get<long long>())
                        : tr("Select an enabled BG ROI"));
-  if (background_subtract_->isChecked() && valid_background) {
-    display = SubtractBackground(display, background["mean"].get<double>());
-  }
+  const Json conversion = ResolveDisplayConversion(
+      ConversionConfig(), calibration_,
+      display.header.camera_settings.empty() ? settings_ : display.header.camera_settings,
+      background);
+  conversion_panel_->ShowResult(conversion);
+  display = ConvertDisplayFrame(display, conversion);
   displayed_frame_ = std::move(display);
   const FrameHeader& h = displayed_frame_.header;
   last_rendered_seq_ = latest->frame.header.seq;
@@ -982,6 +1015,57 @@ DisplayOrientation MainWindow::Orientation() const {
   return o;
 }
 
+Json MainWindow::ConversionConfig() const {
+  Json config = conversion_panel_->Config();
+  config["background_subtract_enabled"] = background_subtract_->isChecked();
+  return config;
+}
+
+void MainWindow::RefreshCalibration() {
+  calibration_dirty_ = false;
+  calibration_ = Json::object();
+  if (control_) {
+    try {
+      calibration_ = control_->Request("get_calibration",
+          {{"wavelength_nm", ConversionConfig()["wavelength_nm"]}}, 2000);
+    } catch (const std::exception& e) {
+      calibration_["error"] = e.what();
+    }
+  }
+  conversion_panel_->SetCalibration(calibration_);
+}
+
+void MainWindow::RefreshDisplayMetadata() {
+  if (calibration_dirty_) RefreshCalibration();
+  Json metadata = SaveMetadata();
+  metadata.erase("saved_at");
+  // Measurements vary every frame; profiles describe configuration only.
+  metadata["display"].erase("background");
+  if (scale_mode_->currentIndex() != kScaleFixed) {
+    metadata["display"].erase("scale_min");
+    metadata["display"].erase("scale_max");
+    metadata["preferences"].erase("display/lo");
+    metadata["preferences"].erase("display/hi");
+  }
+  const bool changed = metadata != display_metadata_;
+  if (changed) {
+    display_metadata_ = metadata;
+    processor_.SetDisplayMetadata(metadata);
+    SavePreferences();
+  }
+  if (control_ && profile_supported_ && (changed || UnixTimeNow() - profile_sent_at_ > 5)) {
+    profile_sent_at_ = UnixTimeNow();
+    try {
+      control_->Request("set_display_profile",
+          {{"profile_id", profile_id_}, {"profile", metadata}}, 2000);
+    } catch (const std::exception& e) {
+      const std::string message = e.what();
+      if (message.find("unknown command") != std::string::npos) profile_supported_ = false;
+      status_error_->setText(tr("GUI settings are not reaching labscript: %1").arg(e.what()));
+    }
+  }
+}
+
 Json MainWindow::SaveMetadata() const {
   Json display = OrientationToJson(Orientation());
   display["threshold_enabled"] = threshold_mode_->isChecked();
@@ -989,7 +1073,38 @@ Json MainWindow::SaveMetadata() const {
   display["background_subtract_enabled"] = background_subtract_->isChecked();
   display["background"] =
       displayed_frame_.analysis.value("background", Json::object());
-  return Json{{"settings", settings_},
+  display["conversion"] = ConversionConfig();
+  display["colormap"] = colormap_->currentText().toStdString();
+  display["reverse"] = reverse_cmap_->isChecked();
+  display["scale_mode"] = scale_mode_->currentIndex();
+  display["scale_min"] = scale_lo_->value();
+  display["scale_max"] = scale_hi_->value();
+  display["percentile_min"] = pct_lo_->value();
+  display["percentile_max"] = pct_hi_->value();
+  display["log_scale"] = log_scale_->isChecked();
+  display["average_frames"] = average_frames_->value();
+  Json preferences = Json::object();
+  QSettings stored;
+  for (const auto& key : stored.allKeys()) {
+    const QVariant value = stored.value(key);
+    preferences[key.toStdString()] = value.metaType().id() == QMetaType::QByteArray
+        ? value.toByteArray().toBase64().toStdString() : value.toString().toStdString();
+  }
+  return Json{{"schema_version", 1}, {"profile_id", profile_id_},
+              {"host", QSysInfo::machineHostName().toStdString()},
+              {"calibration", calibration_}, {"preferences", preferences},
+              {"window_geometry_base64", saveGeometry().toBase64().toStdString()},
+              {"window_state_base64", saveState().toBase64().toStdString()},
+              {"pending_camera_settings", settings_panel_->ChangedSettings()},
+              {"series_frames", arm_frames_->value()},
+              {"trend", trend_panel_->ToJson()},
+              {"connection", {{"host", address_.host}, {"control_port", address_.control_port},
+                              {"data_port", address_.data_port}, {"buffer_frames", address_.buffer_frames},
+                              {"client_name", address_.client_name}, {"ipc_dir", address_.ipc_dir},
+                              {"use_ipc", address_.use_ipc}}},
+              {"stream_recording", {{"path", stream_path_->text().toStdString()},
+                                    {"max_fps", stream_fps_->value()}}},
+              {"settings", settings_},
               {"display", display},
               {"camera",
                {{"model", info_.value("model", "")},
@@ -1006,6 +1121,15 @@ void MainWindow::SaveFramesTo(std::vector<Frame> frames, const QString& path) {
   for (auto& frame : frames) {
     if (!frame.analysis.contains("background"))
       frame.analysis["background"] = MeasureBackground(frame, rois);
+    if (!frame.analysis.contains("gui_settings")) {
+      frame.analysis["gui_settings"] = SaveMetadata();
+      frame.analysis["settings_capture"] = "at save, not at acquisition";
+    }
+    if (!frame.analysis.contains("display_conversion"))
+      frame.analysis["display_conversion"] = ResolveDisplayConversion(
+          ConversionConfig(), calibration_,
+          frame.header.camera_settings.empty() ? settings_ : frame.header.camera_settings,
+          frame.analysis["background"]);
   }
   ImageFormat format;
   if (!FormatFromPath(path.toStdString(), &format)) {
@@ -1036,6 +1160,23 @@ void MainWindow::SaveFramesTo(std::vector<Frame> frames, const QString& path) {
         },
         Qt::QueuedConnection);
   }).detach();
+}
+
+void MainWindow::SaveConvertedFrame() {
+  if (!displayed_frame_.data) return;
+  const auto conversion = displayed_frame_.analysis.value("display_conversion", Json::object());
+  if (!conversion.value("valid", false)) {
+    QMessageBox::warning(this, tr("Save converted"), tr("Resolve the display conversion error first."));
+    return;
+  }
+  const QString path = QFileDialog::getSaveFileName(this, tr("Save float32 values"),
+      "converted.tif", tr("TIFF (*.tif);;FITS (*.fits);;NumPy (*.npy)"));
+  if (!path.isEmpty()) {
+    Frame frame = displayed_frame_;
+    frame.analysis["derived_display_values"] = true;
+    frame.analysis["average_frames_requested"] = average_frames_->value();
+    SaveFramesTo({frame}, path);
+  }
 }
 
 void MainWindow::SaveCurrentFrame() {
@@ -1181,6 +1322,12 @@ void MainWindow::ResetWindowLayout() {
 
 void MainWindow::LoadPreferences() {
   QSettings s;
+  profile_id_ = s.value("display/profile_id", QUuid::createUuid().toString()).toString().toStdString();
+  s.setValue("display/profile_id", QString::fromStdString(profile_id_));
+  try {
+    conversion_panel_->SetConfig(Json::parse(
+        s.value("display/conversion", "{}").toString().toStdString()));
+  } catch (const std::exception&) {}
   address_.buffer_frames = std::max(1, s.value("connection/buffer_frames", 64).toInt());
   address_.host = s.value("connection/host", "localhost").toString().toStdString();
   address_.client_name =
@@ -1243,6 +1390,7 @@ void MainWindow::SavePreferences() const {
   s.setValue("connection/ipc_dir", QString::fromStdString(address_.ipc_dir));
   s.setValue("stream_recording/max_fps", stream_fps_->value());
   s.setValue("stream_recording/path", stream_path_->text());
+  s.setValue("display/conversion", QString::fromStdString(conversion_panel_->Config().dump()));
   s.setValue("display/average_frames", average_frames_->value());
   s.setValue("display/colormap", colormap_->currentText());
   s.setValue("display/reverse", reverse_cmap_->isChecked());
