@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ja">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -20,7 +20,7 @@
   --accent: #7aa7ff; --code-bg: #232327; --warn-bg: #3a3220; --warn-line: #a88a30;
 }
 body { background: var(--bg); color: var(--fg); margin: 0;
-  font: 15px/1.65 system-ui, -apple-system, "Segoe UI", "Noto Sans JP", sans-serif; }
+  font: 15px/1.65 system-ui, -apple-system, "Segoe UI", sans-serif; }
 main { max-width: 980px; margin: 0 auto; padding: 24px 16px 64px; }
 h1 { font-size: 1.7em; margin: 0.2em 0 0.1em; }
 h2 { font-size: 1.3em; margin-top: 2.2em; padding-bottom: 4px; border-bottom: 1px solid var(--line); }
@@ -47,49 +47,50 @@ svg .label { fill: var(--muted); font-size: 12px; }
 <body>
 <main>
 <h1>iXon EMCCD controller</h1>
-<p class="lead">Andor iXon3 DU-897E-CS0-#BV（CCI-23 PCIカード）用のバックエンドサービス、Qt6フロントエンド、Python/labscriptクライアント。</p>
+<p class="lead">Backend service, Qt6 frontend, and Python/labscript client for the Andor iXon3 DU-897E-CS0-#BV (CCI-24 PCI card).</p>
 
 <nav><ol>
-<li><a href="#arch">構成</a></li>
-<li><a href="#install">インストール</a></li>
-<li><a href="#control">設定変更権</a></li>
-<li><a href="#gui">フロントエンド（GUI）</a></li>
-<li><a href="#python">Python API と labscript</a></li>
-<li><a href="#protocol">通信プロトコル</a></li>
-<li><a href="#settings">設定項目</a></li>
-<li><a href="#perf">性能</a></li>
-<li><a href="#hardware">実機で確認すること</a></li>
-<li><a href="#windows">Windows でのビルド</a></li>
-<li><a href="#layout">ソース構成</a></li>
-<li><a href="#stream-rings">リングバッファと欠落通知</a></li>
-<li><a href="#display-average">画像の平均表示</a></li>
-<li><a href="#stream-recording">ライブ画像の逐次保存</a></li>
-<li><a href="#thermal">冷却の監視と記録（Telegraf / Grafana）</a></li>
+<li><a href="#arch">Architecture</a></li>
+<li><a href="#install">Installation</a></li>
+<li><a href="#control">Control ownership</a></li>
+<li><a href="#gui">Frontend (GUI)</a></li>
+<li><a href="#python">Python API and labscript</a></li>
+<li><a href="#protocol">Communication protocol</a></li>
+<li><a href="#settings">Settings</a></li>
+<li><a href="#perf">Performance</a></li>
+<li><a href="#hardware">Hardware verification</a></li>
+<li><a href="#windows">Building on Windows</a></li>
+<li><a href="#layout">Source layout</a></li>
+<li><a href="#stream-rings">Ring buffers and loss notifications</a></li>
+<li><a href="#display-average">Display averaging</a></li>
+<li><a href="#stream-recording">Stream recording</a></li>
+<li><a href="#thermal">Cooling monitoring and telemetry (Telegraf / Grafana)</a></li>
+<li><a href="#display-conversion">Floating-point conversion and settings metadata</a></li>
 </ol></nav>
 
-<h2 id="arch">1. 構成</h2>
+<h2 id="arch">1. Architecture</h2>
 <svg viewBox="0 0 900 250" width="100%" role="img" aria-label="System architecture">
   <defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#1a5fb4"/></marker></defs>
   <rect class="box" x="10" y="70" width="150" height="90" rx="6"/>
   <text x="85" y="105" text-anchor="middle">iXon3 897</text>
-  <text x="85" y="125" text-anchor="middle" class="label">CCI-23 PCI</text>
+  <text x="85" y="125" text-anchor="middle" class="label">CCI-24 PCI</text>
   <rect class="box" x="230" y="30" width="270" height="180" rx="6"/>
   <text x="365" y="55" text-anchor="middle">andor_emccd_backend (systemd)</text>
-  <text x="245" y="85" class="label">engine thread: SDK呼び出しを一元化</text>
-  <text x="245" y="105" class="label">FrameStore: 直近フレームの履歴</text>
-  <text x="245" y="125" class="label">ControlServer: ROUTER（要求/応答）</text>
-  <text x="245" y="145" class="label">PUB: 生フレーム + status</text>
+  <text x="245" y="85" class="label">Engine: all SDK calls on one thread</text>
+  <text x="245" y="105" class="label">FrameStore: recent frame history</text>
+  <text x="245" y="125" class="label">ControlServer: ROUTER (request/reply)</text>
+  <text x="245" y="145" class="label">PUB: raw frames + status</text>
   <text x="245" y="175" class="label">tcp://*:47100/47101</text>
   <text x="245" y="195" class="label">ipc:///run/andor-emccd/{control,data}</text>
   <rect class="box" x="600" y="15" width="290" height="60" rx="6"/>
-  <text x="745" y="40" text-anchor="middle">Qt6 GUI（Linux / Windows）</text>
-  <text x="745" y="60" text-anchor="middle" class="label">表示・ROI演算・UDP出力・保存</text>
+  <text x="745" y="40" text-anchor="middle">Qt6 GUI (Linux / Windows)</text>
+  <text x="745" y="60" text-anchor="middle" class="label">Display, ROI analysis, UDP, export</text>
   <rect class="box" x="600" y="95" width="290" height="60" rx="6"/>
   <text x="745" y="120" text-anchor="middle">labscript BLACS worker</text>
   <text x="745" y="140" text-anchor="middle" class="label">andor_emccd (Python, pyzmq)</text>
   <rect class="box" x="600" y="175" width="290" height="60" rx="6"/>
-  <text x="745" y="200" text-anchor="middle">qtconsole など</text>
-  <text x="745" y="220" text-anchor="middle" class="label">UDP 数値1つ/データグラム（ROI・式の結果）</text>
+  <text x="745" y="200" text-anchor="middle">qtconsole and other clients</text>
+  <text x="745" y="220" text-anchor="middle" class="label">UDP: one ROI/formula value per datagram</text>
   <path class="arrow" d="M160,115 L228,115"/>
   <path class="arrow" d="M500,80 L598,50"/>
   <path class="arrow" d="M598,50 L500,80"/>
@@ -98,129 +99,129 @@ svg .label { fill: var(--muted); font-size: 12px; }
   <path class="arrow" d="M745,75 L745,173"/>
 </svg>
 <ul>
-<li><b>バックエンド</b>（Linux専用）がSDK2を介してカメラを所有します。SDKはスレッドセーフでないため、すべてのSDK呼び出しは1本のengineスレッドで行います。</li>
-<li><b>制御チャネル</b>：ZeroMQ ROUTER。要求は JSON、<code>fetch</code> の応答はフレームごとにバイナリ部を付けて返します（ゼロコピー）。<code>wait</code> は非同期に応答するため、待機中も他のクライアントは止まりません。</li>
-<li><b>データチャネル</b>：ZeroMQ PUB。全フレームをヘッダ JSON + 生データ（uint16, little endian, 行優先）で配信し、0.5 秒ごとに status も配信します。遅い購読者のキューは <code>publish_hwm</code> フレームで頭打ちになり、カメラ側は止まりません。</li>
-<li><b>同一ホスト</b>のクライアントは <code>/run/andor-emccd</code> の Unix ドメインソケット（IPC）を自動で使い、ネットワークスタックを通りません。他ホストは TCP です。</li>
-<li>カメラが開けない場合（ドライバ未ロードなど）もサービスは動き続け、status に <code>disconnected</code> と SDK のエラーを出して 30 秒ごとに再試行します。</li>
-<li>停止時は、冷却中なら -20 °C まで昇温してから <code>ShutDown</code> します（<code>cooler_persist_on_shutdown</code> または <code>warmup_on_exit: false</code> で無効）。</li>
-<li>冷却の状態（センサー温度に加え、ヘッドの冷却制御回路の温度と TE クーラーの電圧）を監視し、冷却が失われたら警報をログと status に出します。<code>telemetry</code> を設定すると Telegraf に送り、Grafana で見られます（<a href="#thermal">15 章</a>）。</li>
+<li>The <b>backend</b> (Linux only) owns the camera through SDK2. The SDK is not thread-safe, so all SDK calls run on a single engine thread.</li>
+<li><b>Control channel</b>: ZeroMQ ROUTER. Requests use JSON; <code>fetch</code> replies include a binary part for each frame, without copying the image data. Replies to <code>wait</code> are asynchronous, so other clients remain responsive.</li>
+<li><b>Data channel</b>: ZeroMQ PUB. Every frame is published as a JSON header and raw pixels (uint16, little-endian, row-major), with status published every 0.5 seconds. Slow subscribers have a queue limit of <code>publish_hwm</code> frames and do not block the camera.</li>
+<li><b>Local clients</b> automatically use Unix domain sockets (IPC) under <code>/run/andor-emccd</code>, bypassing the network stack. Remote clients use TCP.</li>
+<li>If the camera cannot be opened, for example because the driver is not loaded, the service stays running. Status reports <code>disconnected</code> and the SDK error, and the backend retries every 30 seconds.</li>
+<li>On shutdown, a cooled sensor is warmed to -20 °C before <code>ShutDown</code>. This is disabled by <code>cooler_persist_on_shutdown</code> or <code>warmup_on_exit: false</code>.</li>
+<li>The backend monitors sensor temperature, the head's cooling-control circuit temperature, and TE cooler voltage. Loss of cooling raises an alarm in the log and status. Configure <code>telemetry</code> to send measurements to Telegraf for viewing in Grafana (<a href="#thermal">section 15</a>).</li>
 </ul>
 
-<h2 id="install">2. インストール</h2>
-<h3>2.1 カメラPC（AlmaLinux 9）に必要なパッケージ</h3>
+<h2 id="install">2. Installation</h2>
+<h3>2.1 Packages for the camera PC (AlmaLinux 9)</h3>
 <pre><code>sudo dnf install -y epel-release
 sudo dnf config-manager --set-enabled crb
 sudo dnf install -y gcc-c++ cmake ninja-build git make \
     kernel-devel-$(uname -r) elfutils-libelf-devel \
     zeromq-devel cppzmq-devel spdlog-devel
-# GUI もこのPCで使う場合
+# Also install these to run the GUI on this PC
 sudo dnf install -y qt6-qtbase-devel libtiff-devel libpng-devel cfitsio-devel</code></pre>
-<p>nlohmann/json、argparse、tinyexpr、GoogleTest は CMake の FetchContent で取得します（ビルド時にインターネット接続が必要）。</p>
+<p>CMake FetchContent downloads nlohmann/json, argparse, tinyexpr, and GoogleTest, so an Internet connection is required during the build.</p>
 
-<h3>2.2 Andor SDK とPCIドライバ</h3>
+<h3>2.2 Andor SDK and PCI driver</h3>
 <div class="note">
-<p><b>SDK 2.103（<code>andor-2.103.30058.0.tar.gz</code>）を使ってください。</b>Andor から届いたこの版には PCI ドライバのソース <code>src/driver</code>（andordrvlx、GPL-2.0）が含まれています。<code>install_andor</code> もドライバをビルドし、カーネル 3 以降では <code>Makefile5.4</code>（<code>M=</code> 形式）を使います（2026-10-16 確認）。</p>
-<p>SDK 2.104（<code>andor-2.104.30088.0.tar.gz</code>）にはドライバが入っていません。tar の中にもともと <code>src/</code> が無く、解凍方法のせいではありません。<code>install_andor</code> にもドライバを扱う処理がありません。ドライバと <code>libandor.so</code> は同じ版を組み合わせるため、カメラPCには 2.103 一式を入れます。2.104 のヘッダとの違いは、追加された関数 3 つ（<code>GetMetaData</code>、<code>LoadEEPROM</code>、<code>SetKeepCleanMode</code>）だけです。このプログラムはこれらを使っていないので、2.103 でもそのままビルドできるはずです（ヘッダの比較による確認。2.103 でのビルドはまだ試していません）。</p>
-<p>7-Zip（Windows）で解凍すると、tar 内の <code>python/</code> と <code>Python/</code> が 1 つの <code>python/</code> にまとまります。中身は失われていないので問題ありません。Linux では <code>tar -xzf</code> で解凍してください。</p>
+<p><b>Use SDK 2.103 (<code>andor-2.103.30058.0.tar.gz</code>).</b> This distribution from Andor includes the PCI driver source in <code>src/driver</code> (andordrvlx, GPL-2.0). Its <code>install_andor</code> script builds the driver and uses <code>Makefile5.4</code> with the <code>M=</code> syntax for kernels 3 and later (checked on 2026-10-16).</p>
+<p>SDK 2.104 (<code>andor-2.104.30088.0.tar.gz</code>) does not include the driver. The archive itself has no <code>src/</code> directory; this is not an extraction issue. Its <code>install_andor</code> script has no driver installation logic either. Use the complete 2.103 distribution on the camera PC so that the driver and <code>libandor.so</code> versions match. The only additions in the 2.104 header are <code>GetMetaData</code>, <code>LoadEEPROM</code>, and <code>SetKeepCleanMode</code>. This program does not use them, so it was expected to build unchanged with 2.103 (based on a header comparison; a 2.103 build had not yet been tested at that point).</p>
+<p>When 7-Zip extracts the archive on Windows, <code>python/</code> and <code>Python/</code> merge into one <code>python/</code> directory. No contents are lost. On Linux, extract with <code>tar -xzf</code>.</p>
 </div>
-<p><b>2.103 のドライバとカーネル 5.14</b>：ソースを読んで確認しました（この PC ではビルドしていません）。<code>andorcompat.h</code> と <code>fault.c</code> に新しいカーネル向けの分岐があり、<code>get_num_physpages()</code>、<code>vm_fault_t</code>、<code>file_inode()</code>、<code>unlocked_ioctl</code>、<code>VM_RESERVED</code> の代替定義、<code>IRQF_DISABLED</code> の削除に対応済みです。AlmaLinux 9（5.14）ではそのままビルドできる見込みです。ただし、カーネル 6.3 以降（AlmaLinux 10 など）では <code>vma-&gt;vm_flags |=</code> がビルドエラーになり、<code>vm_flags_set()</code> への置き換えが必要です。</p>
-<p><b>コントローラカード</b>：このカメラのカードは CCI-24 です。ドライバは Andor のベンダー ID <code>0x149a</code> のデバイスを、デバイス ID に関係なくすべて拾います。カードの種類（PCI3233、PCI3266、PCIe3201）は PLD のデバイス ID で判別します。<code>lspci -nn -d 149a:</code> と <code>dmesg | grep andordrvlx</code>（「Device ID ...」の行）で、認識されたことを確認してください。</p>
-<p><b>DMA モード（iXon は DMA_MODE=1 が必須）</b>：INSTALL の「Large DMA Transfers」によると、ドライバには 1 行ずつ転送するモード（DMA_MODE=0）と 1 画像ずつ転送するモード（DMA_MODE=1）があり、iXon では DMA_MODE=1 しか使えません。<code>install_andor</code> でも iXon を選ぶと <code>DMA_MODE=1</code> になります。DMA_MODE=1 では、2 画像 × 4 バイト/画素ぶんの物理メモリ（897 では 2 MB）をドライバ専用に確保します。PCI カードは 4 GB より上のアドレスを扱えません。</p>
-<p>2.103 の <code>andor.c</code> では、<code>DMA_ADDRESS</code> を省略すると、バッファの物理アドレスを <code>get_num_physpages()*PAGE_SIZE</code>（RAM の総ページ数 × ページサイズ）として計算します。最近の PC は 4 GB 未満に PCI 用の穴があり、RAM が 4 GB より上にも置かれるので、この値は「RAM の末尾」になりません。そのため、このままでは使えません。確保の方法には次の 3 つがあります。</p>
+<p><b>The 2.103 driver and kernel 5.14</b>: source inspection, without a build on the development PC, found compatibility branches in <code>andorcompat.h</code> and <code>fault.c</code> for <code>get_num_physpages()</code>, <code>vm_fault_t</code>, <code>file_inode()</code>, <code>unlocked_ioctl</code>, replacement definitions for <code>VM_RESERVED</code>, and removal of <code>IRQF_DISABLED</code>. It was expected to build unchanged on AlmaLinux 9 (5.14). On kernels 6.3 and later, including AlmaLinux 10, <code>vma-&gt;vm_flags |=</code> causes a build error and must be replaced with <code>vm_flags_set()</code>.</p>
+<p><b>Controller card</b>: this camera uses a CCI-24. The driver matches all devices with Andor vendor ID <code>0x149a</code>, regardless of device ID. It identifies the card type (PCI3233, PCI3266, or PCIe3201) from the PLD device ID. Check detection with <code>lspci -nn -d 149a:</code> and the “Device ID ...” line in <code>dmesg | grep andordrvlx</code>.</p>
+<p><b>DMA mode (iXon requires DMA_MODE=1)</b>: the INSTALL section “Large DMA Transfers” describes transfers by row (DMA_MODE=0) and by image (DMA_MODE=1). iXon only supports DMA_MODE=1, which <code>install_andor</code> selects for iXon. This mode reserves physical memory for two images at four bytes per pixel (2 MB for the 897). The PCI card cannot address memory above 4 GB.</p>
+<p>In 2.103's <code>andor.c</code>, omitting <code>DMA_ADDRESS</code> sets the physical buffer address to <code>get_num_physpages()*PAGE_SIZE</code> (total RAM pages times page size). Modern PCs have a PCI memory hole below 4 GB and RAM above 4 GB, so this does not identify the end of RAM and cannot be used as-is. There are three allocation approaches:</p>
 <ol>
-<li><code>mem=</code>（Andor の標準の方法）：カーネルが使うメモリを制限し、その上をドライバに使わせます。4 GB 未満にしか置けないため、RAM が 3 GB を超える PC では残りの RAM が使えなくなります。現代の PC には向きません。</li>
-<li><code>memmap=8M$0x40000000</code> で予約し、<code>DMA_ADDRESS</code> で渡す方法：<b>使わないでください。</b>カメラPCで <code>grubby</code> により <code>memmap=8M\$0x40000000</code> を設定したところ、GRUB の <code>$</code> の扱いのために、カーネルには実質 <code>memmap=8M</code>（RAM を 8 MB に制限）として渡り、起動が止まりました（2026-10-16。GRUB の編集画面で引数を消して復旧）。</li>
-<li><b>ドライバで確保する（採用）</b>：ドライバのパッチ（Andor のドライバソースの差分なので、このリポジトリには含めていません）は、<code>DMA_MODE=1</code> かつ <code>DMA_ADDRESS=0</code> のとき、2 つの画像バッファを <code>dma_alloc_coherent</code> で確保します。32 ビットの DMA マスクを設定するので、バッファは 4 GB 未満に置かれます。カーネルの起動オプションは要りません。大きさは <code>DMA_SIZE</code>（MB、2 つのバッファの合計）で決まり、<code>DMA_SIZE=4</code> で 1 つ 2 MB です（897 の全画面は 1 MB）。あわせて、ドライバが行っていなかったバスマスタの有効化（<code>pci_set_master</code>）も加えています。IOMMU が有効な PC でも、DMA API が返すアドレスを渡すので正しく動きます。</li>
+<li><code>mem=</code> (Andor's standard approach): restrict the memory available to the kernel and let the driver use memory above that limit. Because the buffers must be below 4 GB, PCs with more than about 3 GB lose access to their remaining RAM. This is unsuitable for modern PCs.</li>
+<li>Reserve memory with <code>memmap=8M$0x40000000</code> and pass <code>DMA_ADDRESS</code>: <b>do not use this approach.</b> Setting <code>memmap=8M\$0x40000000</code> with <code>grubby</code> on the camera PC caused GRUB's handling of <code>$</code> to pass effectively <code>memmap=8M</code> to the kernel, limiting RAM to 8 MB and preventing boot (2026-10-16; recovered by removing the argument in GRUB's editor).</li>
+<li><b>Allocate in the driver (implemented)</b>: the driver patch, which is not distributed here because it contains changes to Andor's source, allocates two image buffers with <code>dma_alloc_coherent</code> when <code>DMA_MODE=1</code> and <code>DMA_ADDRESS=0</code>. A 32-bit DMA mask keeps their addresses below 4 GB. No kernel boot arguments are needed. <code>DMA_SIZE</code> specifies the combined buffer size in MB; <code>DMA_SIZE=4</code> gives two 2 MB buffers (a full 897 image occupies 1 MB in this format). The patch also enables bus mastering with <code>pci_set_master</code>, which the original driver omitted. Passing the address returned by the DMA API also supports systems with an IOMMU.</li>
 </ol>
-<p><b>その他の注意</b>：</p>
+<p><b>Additional notes:</b></p>
 <ul>
-<li><b>モジュールの読み込み</b>：<code>install_andor</code> は <code>/etc/andordrvlx_load DMA_MODE=1</code> を <code>/etc/rc.d/rc.local</code> に書きますが、同時にプロンプトの出力（<code>more</code> の出力やパイプで渡した答え）を <code>#!/bin/bash</code> の前に書き込むため、起動時に「Exec format error」で失敗し、再起動後にドライバが読み込まれません。<code>tools/camera_pc/25_driver_service_root.sh</code>（20 番の最後でも実行）が rc.local を直して Andor の行を除き、代わりに systemd の <code>andordrvlx.service</code> で読み込みます。バックエンドのサービスはこの後に起動します。ロードスクリプトは <code>modprobe</code> を使うので、<code>/etc/modprobe.d/andordrvlx.conf</code> の <code>options</code> が反映されます。デバイスファイルはロードスクリプトが <code>mknod</code> で作ります。</li>
-<li><b>Detector.ini</b>：古い CCD 用の CodeFile 指定で、iXon は不要です。</li>
-<li><b>Secure Boot</b>：有効な場合、自作モジュールには署名（<code>mokutil</code>）が必要です（試験したカメラPCでは無効）。</li>
+<li><b>Module loading</b>: <code>install_andor</code> adds <code>/etc/andordrvlx_load DMA_MODE=1</code> to <code>/etc/rc.d/rc.local</code>, but also writes prompt output, including <code>more</code> output and piped answers, before <code>#!/bin/bash</code>. This produces “Exec format error” at boot and leaves the driver unloaded. <code>tools/camera_pc/25_driver_service_root.sh</code>, also run at the end of script 20, repairs rc.local, removes the Andor entry, and loads the driver through <code>andordrvlx.service</code> instead. The backend service starts afterward. The loader uses <code>modprobe</code>, so it honors <code>options</code> in <code>/etc/modprobe.d/andordrvlx.conf</code>. It creates device files with <code>mknod</code>.</li>
+<li><b>Detector.ini</b>: specifies a CodeFile for older CCDs and is not needed for iXon.</li>
+<li><b>Secure Boot</b>: custom modules must be signed using <code>mokutil</code> when Secure Boot is enabled. It was disabled on the tested camera PC.</li>
 </ul>
-<p>カメラPCでの手順（root が必要な部分はスクリプト）：</p>
+<p>Camera PC setup (steps requiring root are scripted):</p>
 <pre><code>lspci -nn -d 149a:                       # CCI-24: 149a:0008 (PCIe3201)
 mokutil --sb-state
-sudo tools/camera_pc/10_prepare_root.sh  # パッケージ、memmap= の除去、modprobe.d (DMA_MODE=1 DMA_SIZE=4)
-sudo AEC_DRIVER_PATCH=&lt;パッチ&gt; tools/camera_pc/20_install_andor_root.sh [andor-2.103.30058.0.tar.gz]
-                                         # パッチ適用、install_andor (4 = PCI iXon)、ドライバの確認、
-                                         # 最後に 25 番（rc.local の修復と andordrvlx.service）
-sudo tools/camera_pc/25_driver_service_root.sh   # 単独でも実行可
+sudo tools/camera_pc/10_prepare_root.sh  # Packages, remove memmap=, modprobe.d (DMA_MODE=1 DMA_SIZE=4)
+sudo AEC_DRIVER_PATCH=&lt;patch-path&gt; tools/camera_pc/20_install_andor_root.sh [andor-2.103.30058.0.tar.gz]
+                                         # Apply patch, install_andor (4 = PCI iXon), check driver,
+                                         # then run script 25 (repair rc.local and install andordrvlx.service)
+sudo tools/camera_pc/25_driver_service_root.sh   # Can also be run separately
 ls -l /dev/andordrvlx*; dmesg | grep andordrvlx</code></pre>
 
-<h3>2.3 ビルドとサービス登録</h3>
+<h3>2.3 Build and service installation</h3>
 <pre><code>git clone https://github.com/kenji0923/AndorEMCCDcontroller && cd AndorEMCCDcontroller
 cmake -S src -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
       -DANDOR_SDK_ROOT=/usr/local -DAEC_BUILD_GUI=OFF
 cmake --build build
 (cd build &amp;&amp; ctest)</code></pre>
-<p>バックエンドは、<b>システムサービス</b>と<b>ユーザーサービス</b>のどちらでも動かせます。カメラを使えるのは 1 つのバックエンドだけなので、どちらか一方にしてください（それぞれのインストーラは、もう一方を無効にします）。IPC のソケットはどちらも <code>/run/andor-emccd</code> に置くので、クライアントの設定は同じです。</p>
+<p>The backend can run as either a <b>system service</b> or a <b>user service</b>. Only one backend can use the camera, so enable just one; each installer disables the other. Both use IPC sockets under <code>/run/andor-emccd</code>, so client configuration is the same.</p>
 <table>
-<tr><th></th><th>システムサービス（推奨：常設のカメラ PC）</th><th>ユーザーサービス（開発・試験用）</th></tr>
-<tr><td>実行ユーザー</td><td>専用の <code>andor</code>（ログイン不可）</td><td>ログインユーザー（例：alice）</td></tr>
-<tr><td>root 作業</td><td>インストールのたび</td><td>最初の 1 回だけ（以後の更新は root 不要）</td></tr>
-<tr><td>プログラム / 設定</td><td><code>/usr/local/bin</code>、<code>/etc/andor-emccd/backend.json</code></td><td><code>~/.local/bin</code>、<code>~/.config/andor-emccd/backend.json</code></td></tr>
-<tr><td>保存された設定</td><td><code>/var/lib/andor-emccd/settings.json</code></td><td><code>~/.local/state/andor-emccd/settings.json</code></td></tr>
-<tr><td>起動の順序</td><td>ドライバ（<code>andordrvlx.service</code>）の後</td><td>順序は付けられない（カメラが開けなければ 30 秒ごとに再試行）</td></tr>
-<tr><td>停止時の昇温（−20 °C まで、最大 15 分）</td><td>PC のシャットダウン時も待つ（最大 16 分）</td><td>手動の停止では待つ。PC のシャットダウン時は、ユーザーマネージャごと約 2 分で止められる</td></tr>
-<tr><td>ログ</td><td><code>journalctl -u andor-emccd-backend</code></td><td><code>journalctl --user -u andor-emccd-backend-user</code>（ユーザーのジャーナルが無い設定では <code>sudo journalctl _SYSTEMD_USER_UNIT=andor-emccd-backend-user.service</code>）</td></tr>
+<tr><th></th><th>System service (recommended for a permanent camera PC)</th><th>User service (development and testing)</th></tr>
+<tr><td>Account</td><td>Dedicated <code>andor</code> user, without login access</td><td>Login user, such as alice</td></tr>
+<tr><td>Root access</td><td>Required for every installation</td><td>Required only for initial setup; subsequent updates need no root access</td></tr>
+<tr><td>Executable / configuration</td><td><code>/usr/local/bin</code>, <code>/etc/andor-emccd/backend.json</code></td><td><code>~/.local/bin</code>, <code>~/.config/andor-emccd/backend.json</code></td></tr>
+<tr><td>Saved settings</td><td><code>/var/lib/andor-emccd/settings.json</code></td><td><code>~/.local/state/andor-emccd/settings.json</code></td></tr>
+<tr><td>Startup order</td><td>After the driver (<code>andordrvlx.service</code>)</td><td>No ordering dependency; retries every 30 seconds if the camera cannot be opened</td></tr>
+<tr><td>Warm-up on exit (to −20 °C, up to 15 minutes)</td><td>Also waits during PC shutdown, for up to 16 minutes</td><td>Waits on manual stop; at PC shutdown the user manager is terminated after about 2 minutes</td></tr>
+<tr><td>Logs</td><td><code>journalctl -u andor-emccd-backend</code></td><td><code>journalctl --user -u andor-emccd-backend-user</code>; if user journals are unavailable, use <code>sudo journalctl _SYSTEMD_USER_UNIT=andor-emccd-backend-user.service</code></td></tr>
 </table>
-<p><b>システムサービス</b>：</p>
+<p><b>System service:</b></p>
 <pre><code>sudo AEC_FIREWALL_ZONE=internal deploy/install_backend.sh build
 systemctl status andor-emccd-backend
 journalctl -u andor-emccd-backend -f
-sudo usermod -aG andor $USER     # 同じPCで GUI / Python を IPC 接続する場合（再ログイン後に有効）
-# 更新：ビルドしてから同じコマンドを再実行（backend.json は上書きしない）
-# 停止・無効化：sudo systemctl disable --now andor-emccd-backend</code></pre>
-<p><code>install_backend.sh</code> は次を行います：<code>andor</code> ユーザー/グループ作成、<code>/usr/local/bin/andor_emccd_backend</code>、<code>/etc/andor-emccd/backend.json</code>（既存なら上書きしない）、systemd ユニット、udev ルール（<code>/dev/andordrvlx*</code> を andor グループに）、firewalld でポート 47100-47101/tcp を開放、実行したユーザーのユーザーサービスがあれば無効化、サービスの有効化と起動。</p>
-<p><b>ユーザーサービス</b>：</p>
-<pre><code>sudo AEC_FIREWALL_ZONE=internal deploy/prepare_user_service_root.sh   # 最初の 1 回（root）
-# いったんログアウトして入り直す（andor グループを反映）
-deploy/install_backend_user.sh build                                  # 以後はユーザーで
+sudo usermod -aG andor $USER     # For local GUI / Python IPC access; log in again afterward
+# Update: rebuild and rerun the installer (backend.json is preserved)
+# Stop and disable: sudo systemctl disable --now andor-emccd-backend</code></pre>
+<p><code>install_backend.sh</code> creates the <code>andor</code> user/group, installs <code>/usr/local/bin/andor_emccd_backend</code>, creates <code>/etc/andor-emccd/backend.json</code> if absent, installs the systemd unit and udev rules granting the andor group access to <code>/dev/andordrvlx*</code>, opens TCP ports 47100–47101 in firewalld, disables the invoking user's user service if present, and enables and starts the system service.</p>
+<p><b>User service:</b></p>
+<pre><code>sudo AEC_FIREWALL_ZONE=internal deploy/prepare_user_service_root.sh   # One-time root setup
+# Log out and back in to apply andor group membership
+deploy/install_backend_user.sh build                                  # Subsequent steps run as the user
 systemctl --user status andor-emccd-backend-user
 systemctl --user restart andor-emccd-backend-user
-# 更新：ビルドしてから install_backend_user.sh を再実行（backend.json は上書きしない）
-# シミュレータで試す：AEC_CAMERA=sim deploy/install_backend_user.sh build（backend.json を作り直す）
-# 停止・無効化：systemctl --user disable --now andor-emccd-backend-user</code></pre>
-<p><code>prepare_user_service_root.sh</code> は、andor グループを作ってユーザーを加え、udev ルール、<code>/etc/tmpfiles.d/andor-emccd.conf</code>（<code>/run/andor-emccd</code> を root:andor、2775 で作る）、firewalld のポート、<code>loginctl enable-linger</code>（ログインしていなくても起動時にサービスを開始し、ログアウトしても止めない）を設定し、システムサービスがあれば無効化します。<code>install_backend_user.sh</code> は、プログラムと説明書を <code>~/.local</code> に、<code>deploy/backend.json</code> を基にした設定（保存先をホームに変えたもの）を <code>~/.config/andor-emccd</code> に置き、<code>~/.config/systemd/user/andor-emccd-backend-user.service</code> を有効にして起動します。カメラPCで、シミュレータの設定によるインストール、起動、TCP での取得、停止、設定の保存を確認しました（2026-10-22。確認後に削除）。</p>
-<p>設定ファイル <code>backend.json</code>（コメント可）の主な項目：<code>camera</code>（<code>andor</code>/<code>sim</code>）、<code>bind_address</code>、ポート、<code>history_frames</code>/<code>history_megabytes</code>（<code>fetch</code> で取り出せる履歴）、<code>initial_settings</code>、<code>cooling_lost_margin_c</code> と <code>telemetry</code>（<a href="#thermal">15 章</a>）。最後に適用した設定は <code>settings_file</code>（上の表）に保存され、再起動後に復元されます。</p>
+# Update: rebuild and rerun install_backend_user.sh (backend.json is preserved)
+# Simulator: AEC_CAMERA=sim deploy/install_backend_user.sh build (recreates backend.json)
+# Stop and disable: systemctl --user disable --now andor-emccd-backend-user</code></pre>
+<p><code>prepare_user_service_root.sh</code> creates the andor group, adds the user, configures udev, installs <code>/etc/tmpfiles.d/andor-emccd.conf</code> to create <code>/run/andor-emccd</code> with owner root:andor and mode 2775, opens firewall ports, enables lingering with <code>loginctl enable-linger</code> so the service starts at boot and survives logout, and disables any system service. <code>install_backend_user.sh</code> installs the executable and manual under <code>~/.local</code>, creates configuration under <code>~/.config/andor-emccd</code> based on <code>deploy/backend.json</code> with state paths in the user's home directory, and enables and starts <code>~/.config/systemd/user/andor-emccd-backend-user.service</code>. Simulator installation, startup, TCP acquisition, shutdown, and settings persistence were verified on the camera PC on 2026-10-22; that test installation was subsequently removed.</p>
+<p>Key entries in <code>backend.json</code>, which permits comments, are <code>camera</code> (<code>andor</code>/<code>sim</code>), <code>bind_address</code>, ports, <code>history_frames</code>/<code>history_megabytes</code> (history available through <code>fetch</code>), <code>initial_settings</code>, <code>cooling_lost_margin_c</code>, and <code>telemetry</code> (<a href="#thermal">section 15</a>). The last applied settings are saved to <code>settings_file</code>, at the location in the table above, and restored on restart.</p>
 
-<h2 id="control">3. 設定変更権</h2>
-<p>複数のクライアントが同時に設定を変えないよう、バックエンドが「設定変更権」を1つだけ発行します。認証はありません。</p>
+<h2 id="control">3. Control ownership</h2>
+<p>The backend grants control to one client at a time to prevent conflicting changes. There is no authentication.</p>
 <ul>
-<li>変更系のコマンド（<code>set_settings, start, arm, stop, software_trigger</code>）は変更権を持つクライアントだけが実行できます。それ以外のクライアントは <code>code: "not_controller"</code> で拒否されます。読み出し系（<code>get_*</code>, <code>fetch</code>, <code>wait</code>, ライブ配信）は誰でも使えます。</li>
-<li>変更権は <code>acquire_control</code> で要求し、空いていればバックエンドが承認します。他のクライアントが持っていれば <code>code: "control_denied"</code> と持ち主を返します。<code>force: true</code> で奪えます（GUI は確認ダイアログを出します）。<code>release_control</code> で手放します。</li>
-<li>各クライアントは起動ごとのランダムな ID と名前を全要求に付けます。表示名は <code>名前@IP</code>、名前が空なら <code>client@IP</code>。IP は TCP ならバックエンドが見た接続元アドレス、同一ホスト（IPC）ならクライアントが申告した LAN 側アドレスです。</li>
-<li>持ち主は status の <code>control</code>（<code>{"holder", "holder_id", "since"}</code> または null）で全クライアントに配信され、GUI の Status に表示されます。</li>
-<li>持ち主が落ちても権利が残らないよう、持ち主は 2 秒ごとに keepalive を送り、<code>control_lease_s</code>（既定 10 秒）途絶えると自動で解放されます。GUI と Python クライアントは自動で keepalive を送ります。</li>
+<li>Only the controller can issue commands that change camera state (<code>set_settings, start, arm, stop, software_trigger</code>). Other clients receive <code>code: "not_controller"</code>. Read operations (<code>get_*</code>, <code>fetch</code>, <code>wait</code>, and live streaming) are available to all clients.</li>
+<li>Request control with <code>acquire_control</code>. If unclaimed, the backend grants it; otherwise it returns <code>code: "control_denied"</code> and the current holder. Use <code>force: true</code> to take over; the GUI asks for confirmation. Release it with <code>release_control</code>.</li>
+<li>Each client includes a random ID generated at startup and a name in every request. The display name is <code>name@IP</code>, or <code>client@IP</code> if unnamed. For TCP, the IP is the peer address seen by the backend; for local IPC, it is the LAN address reported by the client.</li>
+<li>Status broadcasts the owner to all clients in <code>control</code> (<code>{"holder", "holder_id", "since"}</code> or null). The GUI shows it in Status.</li>
+<li>The controller sends a keepalive every 2 seconds. If none arrives within <code>control_lease_s</code> (default 10 seconds), the backend releases control, preventing a crashed client from retaining it. GUI and Python clients send keepalives automatically.</li>
 </ul>
-<p>同じマシンで GUI を 2 つ起動することはできません。クライアントは connect するだけで送信元ポートは毎回 OS が割り当てるため、ポートのバインドで自然に防がれることはありません。そこで GUI は起動時に <code>127.0.0.1:47109</code> を自分でバインドし、2 つ目はこのバインドに失敗して終了します（マシン全体で有効。異常終了してもOSが解放）。</p>
+<p>Only one GUI instance can run on a machine. Normal client connections use OS-assigned source ports, so they do not prevent duplicate instances. The GUI therefore binds <code>127.0.0.1:47109</code> at startup; a second instance fails to bind and exits. This lock applies across the machine and is released by the OS after a crash.</p>
 
-<h2 id="gui">4. フロントエンド（GUI）</h2>
-<pre><code>andor_emccd_gui                                  # 前回の接続先へ。同一ホストなら IPC
-andor_emccd_gui --host camera-pc --tcp         # LAN 経由
-andor_emccd_gui --name alice --request-control   # 名前を付け、接続後に変更権を要求</code></pre>
+<h2 id="gui">4. Frontend (GUI)</h2>
+<pre><code>andor_emccd_gui                                  # Previous destination; IPC for a local host
+andor_emccd_gui --host camera-pc --tcp             # Connect over the LAN
+andor_emccd_gui --name alice --request-control    # Set a name and request control after connecting</code></pre>
 <table>
-<tr><th>機能</th><th>操作</th></tr>
-<tr><td>変更権</td><td>ツールバーの Request control / Release control。持っていないときは取得ボタンと Apply が無効になり、Status の Control に持ち主が表示されます</td></tr>
-<tr><td>EM ゲイン</td><td>ツールバーの EM gain ボタンでオン/オフ（押すとすぐ適用）。値・モード・advanced は Camera settings の EM gain 欄。オフにしてもゲイン値は保持され、オンで元に戻ります。Status の EM gain に実際に掛かっているゲイン（on, 200 / off (set point 200) / conventional amplifier）を表示</td></tr>
-<tr><td>取得</td><td>ツールバーの Live（連続）、Single（1枚）、Series（N枚のキネティック。外部トリガ待ちにも使う）、Stop、Software trigger</td></tr>
-<tr><td>設定</td><td>Camera settings タブ。変更した項目が黄色になり、Apply で差分だけ送信。連続取得中の変更は自動で再スタート。警告（範囲外の補正など）は Status に表示</td></tr>
-<tr><td>状態</td><td>Status：センサー温度（緑=安定、黄=安定化中、赤=未到達、灰=冷却オフ）、run・フレーム数、カメラ/表示 fps、取りこぼし数、実際の露光・サイクル・読み出し時間</td></tr>
-<tr><td>表示</td><td>ホイールでカーソル位置を中心にズーム、ドラッグでパン、ダブルクリックで全体表示、1:1。カラーマップ：gray, viridis, inferno, magma, plasma, cividis, turbo, hot, jet, coolwarm, seismic（反転可）。スケール：自動（min–max）、自動（パーセンタイル）、固定。対数表示、上下左右反転、回転（0°／90°／180°／270° 時計回り。反転の後に回転）。ステータスバーにカーソル位置の画素値とセンサー座標</td></tr>
-<tr><td>しきい値表示</td><td>Display の <code>Threshold (photon-counting display)</code> をオンにし、<code>Threshold (raw units)</code> を設定すると、その値以上を白、未満を黒で表示します。表示平均が有効な場合は平均後の値で判定します。表示だけの二値化なので、生フレームの保存・録画・ROI 演算・UDP 出力の値は元のままです。Save view は表示どおりの白黒画像を保存します。モードとしきい値は次回起動時に復元されます。</td></tr>
-<tr><td>ROI</td><td>Analysis タブで Add、または Draw on image / ツールバーの Draw ROI で画像上をドラッグ。ROI 内をドラッグで移動。表で座標・名前を編集。各 ROI の sum, max, min, mean, std（count も）を全フレームで計算</td></tr>
-<tr><td>式</td><td>Formulas に名前と式。変数は <code>&lt;ROI名&gt;_sum</code> など、前の式の名前も使用可。例：<code>signal = sig_sum - bg_mean * sig_count</code>, <code>ratio = signal / sig_sum</code>。関数：abs sqrt exp ln log10 pow sin cos …（tinyexpr）</td></tr>
-<tr><td>UDP</td><td>Analysis タブの UDP output 表で Add。1行が1つの変数（ROI 統計か式の名前）を1つの送信先ホスト:ポートに送ります。1フレームごとに数値1つだけの1データグラムで、<a href="https://github.com/kenji0923/qtconsole">qtconsole</a> がそのまま読める形式です。Format は Text（例 <code>17850</code>、最短で元の値に戻る10進表記、ロケールに依存しない）か Double（8 バイトのリトルエンディアン double）。新しい行のポートは 9000（qtconsole の既定）から順に増えます。ブロードキャストアドレスも可。値が nan/inf のフレームは送りません。変数名が無いなど送れない行は、表の下に「row 3: unknown variable 'x'」のように表示します。以前の JSON 形式の設定（host/port 1つ）は、最後の式を送る無効な行に変換されます</td></tr>
-<tr><td>トレンド</td><td>Trend ドックで変数を選択して時系列表示。Normalize で桁の違う値を重ねて表示。縦軸は既定でオートスケール（表示中の最小〜最大）、Fixed scale をオンにすると Min〜Max に固定（Normalize 中は 0〜1 の値に対して。オートのときの範囲が Min/Max に入るので、オンにするとその範囲で固定される）。設定は保存される</td></tr>
-<tr><td>保存</td><td>Save frame（表示中の生フレーム）、Record（次の N フレーム）、Save run（バックエンド履歴から run 全体を取り出し、取りこぼしなし）。形式：TIFF（16/32 bit、多ページ、JSON メタデータ）、FITS（2D/3D キューブ、EXPTIME, EMGAIN, CCD-TEMP, XBINNING などのキーワード）、PNG（16 bit グレースケール）、NPY。Save view は表示中のカラー画像を 8 bit PNG で保存<br>表示の向き：保存する画素データは回転・反転せず（読み出し順のまま）、表示の向きを記録します。TIFF（Save frame / Record / Save run / 逐次保存）は標準の Orientation タグ（1〜8。対応するビューアでは GUI と同じ向きに表示）、FITS はキーワード DISPROT（時計回りの角度）、DISPFLPH、DISPFLPV、TIFF・PNG・FITS の JSON メタデータには <code>display</code>（<code>rotation_cw_deg</code>、<code>flip_horizontal</code>、<code>flip_vertical</code>、<code>tiff_orientation</code>、順序は「反転してから時計回りに回転」）。Python では <code>np.rot90(np.fliplr(a), -1)</code> のように、反転→回転の順で同じ向きにできます。Save view（擬似カラー PNG）は表示どおりの向きで保存します。</td></tr>
+<tr><th>Feature</th><th>Operation</th></tr>
+<tr><td>Control ownership</td><td>Use Request control / Release control on the toolbar. Acquisition and Apply buttons are disabled without control; Status shows the current holder.</td></tr>
+<tr><td>EM gain</td><td>The toolbar's EM gain button toggles gain and applies the change immediately. Set the value, mode, and advanced option in Camera settings. Disabling gain preserves the setpoint for the next enable. Status shows the applied state: on, 200 / off (set point 200) / conventional amplifier.</td></tr>
+<tr><td>Acquisition</td><td>Toolbar controls: Live (continuous), Single (one frame), Series (N kinetic frames, also for external triggers), Stop, and Software trigger.</td></tr>
+<tr><td>Settings</td><td>Changed fields in Camera settings turn yellow. Apply sends only the changes. Changing settings during continuous acquisition restarts it automatically. Status displays warnings such as corrections to out-of-range values.</td></tr>
+<tr><td>Status</td><td>Sensor temperature (green: stabilized, yellow: stabilizing, red: target not reached, gray: cooling off), run and frame counts, camera/display fps, dropped frames, and actual exposure, cycle, and readout times.</td></tr>
+<tr><td>Display</td><td>Use the wheel to zoom around the cursor, drag to pan, double-click to fit, or choose 1:1. Colormaps: gray, viridis, inferno, magma, plasma, cividis, turbo, hot, jet, coolwarm, and seismic, with optional reversal. Scaling: automatic min–max, automatic percentiles, or fixed. Log display, horizontal/vertical flips, and clockwise rotation (0°/90°/180°/270°, applied after flips) are available. The status bar shows the pixel value and sensor coordinates under the cursor.</td></tr>
+<tr><td>Threshold display</td><td>Enable <code>Threshold (photon-counting display)</code> in Display and set the threshold. Values at or above it appear white; lower values appear black. With display averaging enabled, the threshold is applied to the averaged values. This affects display only: raw frame exports, recordings, ROI calculations, and UDP output retain their original values. Save view exports the displayed black-and-white image. The mode and threshold are restored on the next launch.</td></tr>
+<tr><td>ROI</td><td>Use Add in Analysis, or Draw on image / the toolbar's Draw ROI and drag on the image. Drag inside an ROI to move it. Edit coordinates and names in the table. Each ROI's sum, max, min, mean, std, and count are calculated for every frame.</td></tr>
+<tr><td>Formulas</td><td>Enter a name and expression in Formulas. Variables include <code>&lt;ROI-name&gt;_sum</code> and the names of earlier formulas. Examples: <code>signal = sig_sum - bg_mean * sig_count</code> and <code>ratio = signal / sig_sum</code>. Functions include abs, sqrt, exp, ln, log10, pow, sin, cos, and others from tinyexpr.</td></tr>
+<tr><td>UDP</td><td>Add rows to Analysis's UDP output table. Each row sends one variable (an ROI statistic or formula) to one host:port, with one numeric value per datagram per frame, directly readable by <a href="https://github.com/kenji0923/qtconsole">qtconsole</a>. Format is Text (for example <code>17850</code>, using the shortest locale-independent decimal representation that round-trips) or Double (8-byte little-endian double). New rows use sequential ports starting at qtconsole's default, 9000. Broadcast addresses are supported. Frames with nan/inf values are skipped. Invalid rows are explained below the table, for example “row 3: unknown variable 'x'”. Legacy JSON-format settings with one host/port are migrated to a disabled row sending the last formula.</td></tr>
+<tr><td>Trend</td><td>Select variables in the Trend dock to plot them over time. Normalize overlays values of different magnitudes. The vertical axis defaults to automatic scaling over the visible minimum and maximum. Fixed scale locks it to Min–Max, or to normalized 0–1 values when Normalize is enabled. Automatic limits populate Min/Max, so enabling Fixed scale freezes the current range. Settings persist.</td></tr>
+<tr><td>Save</td><td>Save frame exports the displayed raw frame; Record captures the next N frames; Save run retrieves the entire run from backend history without live-display drops. Formats: TIFF (16/32 bit, multipage, JSON metadata), FITS (2D/3D cubes with EXPTIME, EMGAIN, CCD-TEMP, XBINNING, and other keywords), PNG (16-bit grayscale), and NPY. Save view exports the displayed color image as an 8-bit PNG.<br>Orientation: raw pixels retain readout order, without rotation or flipping; display orientation is recorded separately. TIFF (Save frame / Record / Save run / stream recording) uses the standard Orientation tag, values 1–8, allowing compatible viewers to match the GUI. FITS uses DISPROT (clockwise angle), DISPFLPH, and DISPFLPV. TIFF/PNG/FITS JSON metadata includes <code>display</code> with <code>rotation_cw_deg</code>, <code>flip_horizontal</code>, <code>flip_vertical</code>, and <code>tiff_orientation</code>, in flip-then-clockwise-rotate order. In Python, use the same order, for example <code>np.rot90(np.fliplr(a), -1)</code>. Save view writes the displayed orientation directly.</td></tr>
 </table>
-<p>ROI 演算、式、UDP 送信、Record は受信スレッドで全フレームに対して行います。描画は最新フレームだけを最大約 60 Hz で行うため、高フレームレートでも解析は間引かれません。表示・ROI・式・UDP の設定は次回起動時に復元されます。</p>
-<p>qtconsole での受信例（変数ごとに1つ起動し、ポートを UDP output の行に合わせる）：</p>
+<p>ROI calculations, formulas, UDP output, and Record process every received frame independently of rendering. Rendering uses only the latest frame at up to about 60 Hz, so high camera rates do not subsample analysis. Display, ROI, formula, and UDP settings are restored on the next launch.</p>
+<p>Example qtconsole receivers: run one per variable and match each port to its UDP output row.</p>
 <pre><code>qtconsole --protocol udp --port 9000 --measurement signal
 qtconsole --protocol udp --port 9001 --measurement roi1_sum</code></pre>
-<p>Python で受ける場合：</p>
+<p>Receiving in Python:</p>
 <pre><code>import socket, struct
 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.bind(("", 9000))
 p = s.recv(64)
@@ -228,285 +229,286 @@ try:
     value = float(p.decode())            # Text
 except (UnicodeDecodeError, ValueError):
     value = struct.unpack("&lt;d", p)[0]    # Double (8 bytes)</code></pre>
-<p>アイコン：センサーのパッケージ（金のピン）、画像領域の画素と輝点・単一光子イベント、その下の読み出しレジスタ（EM ゲイン部分が出力アンプに向かって明るくなる）を図案にしています。ウィンドウのアイコンは <code>AppIcon.cc</code> がコードで描き、Windows の .exe には同じ絵の .ico（<code>src/exec/gui/resources/</code>）を埋め込みます。Linux では <code>cmake --install</code> で .desktop ファイルと PNG アイコンが入ります。</p>
+<p>The icon depicts a sensor package with gold pins, image pixels and bright single-photon events, and a readout register whose EM section brightens toward the output amplifier. <code>AppIcon.cc</code> draws the window icon in code; the Windows executable embeds the matching .ico from <code>src/exec/gui/resources/</code>. On Linux, <code>cmake --install</code> installs a .desktop file and PNG icon.</p>
 
-<h2 id="python">5. Python API と labscript</h2>
+<h2 id="python">5. Python API and labscript</h2>
 <pre><code>pip install ./python            # numpy, pyzmq
 from andor_emccd import AndorEMCCDClient, FrameSubscriber, WaitTimeoutError
-cam = AndorEMCCDClient("camera-pc", name="analysis")  # 同一ホストなら IPC を自動選択
-cam.acquire_control()                         # 他が持っていれば ControlDeniedError
+cam = AndorEMCCDClient("camera-pc", name="analysis")  # Automatically selects IPC for a local host
+cam.acquire_control()                         # ControlDeniedError if another client holds control
 cam.set_settings(exposure_time_s=0.005, trigger_mode="external",
-                 em_gain_enabled=True, em_gain=100)   # EM ゲインは既定でオフ
-run = cam.arm(n_frames=3)                     # キネティック 3 枚、トリガ待ち
-cam.wait(run["run_id"], timeout_s=10)         # 届かなければ WaitTimeoutError
+                 em_gain_enabled=True, em_gain=100)   # EM gain defaults to off
+run = cam.arm(n_frames=3)                     # Arm three kinetic frames for triggering
+cam.wait(run["run_id"], timeout_s=10)         # WaitTimeoutError if frames do not arrive
 images, headers = cam.fetch(run["run_id"])   # (3, 512, 512) uint16
 cam.get_status()["temperature_c"]
-cam.release_control()                         # close() でも手放す
+cam.release_control()                         # close() also releases control
 
-sub = FrameSubscriber("camera-pc")          # ライブ受信
+sub = FrameSubscriber("camera-pc")          # Receive live frames
 topic, header, image = sub.recv(timeout_s=1.0)</code></pre>
-<p><code>wait</code> の間そのクライアントはロックされます。待機中に <code>stop</code> などを送るには 2 つ目のクライアントを使ってください。<code>fetch(..., stack=False)</code> はコピーしないビューのリストを返し、大きな run で約 2 倍速くなります。</p>
-<p>labscript デバイス <code>python/labscript_devices/AndorEMCCDRemote</code> は IMAQdxCamera 系の作法に従います（<code>user_devices</code> に置く。詳細は同ディレクトリの README）。</p>
+<p>The client is locked during <code>wait</code>. Use a second client to send <code>stop</code> or other commands while waiting. <code>fetch(..., stack=False)</code> returns a list of views without copying and is about twice as fast for large runs.</p>
+<p>The labscript device in <code>python/labscript_devices/AndorEMCCDRemote</code> follows the IMAQdxCamera conventions. Install it under <code>user_devices</code>; see its README for details.</p>
 <pre><code>from user_devices.AndorEMCCDRemote.labscript_devices import AndorEMCCDRemote
 AndorEMCCDRemote("emccd", parent_device=trigger_do, connection="trigger",
                  host="camera-pc", trigger_edge_type="rising",
                  camera_attributes={"trigger_mode": "external",
                                     "exposure_time_s": 0.002,
                                     "em_gain_enabled": True, "em_gain": 100})
-# 実験スクリプト: emccd.expose(t, "atoms", trigger_duration=1e-3)</code></pre>
-<p>ワーカーは変更系の操作の前に変更権を取得します（名前は既定で <code>labscript</code>）。GUI が持っているとショットは ControlDeniedError で失敗し、持ち主が表示されます。接続テーブルで <code>force_control=True</code> にすると奪います。</p>
-<p>transition_to_buffered でショットの枚数ぶん <code>arm</code> し、grab_multiple で届いた順に取り出して h5 に保存します。</p>
+# Experiment script: emccd.expose(t, "atoms", trigger_duration=1e-3)</code></pre>
+<p>The worker requests control before operations that change camera state; its default name is <code>labscript</code>. If the GUI holds control, the shot fails with ControlDeniedError and identifies the holder. Set <code>force_control=True</code> in the connection table to take over.</p>
+<p>In transition_to_buffered, it calls <code>arm</code> for the shot's frame count. In grab_multiple, it retrieves arriving frames and saves them to HDF5.</p>
 
-<h2 id="protocol">6. 通信プロトコル</h2>
-<p>制御：クライアント（REQ または DEALER）が <code>[空フレーム, JSON]</code> を送ります。JSON は <code>{"id", "cmd", "args", "client": {"id", "name", "host"}}</code>。応答は <code>[空フレーム, {"id", "ok", "result"|"error", "code"?}, バイナリ...]</code>。</p>
+<h2 id="protocol">6. Communication protocol</h2>
+<p>Control: a REQ or DEALER client sends <code>[empty frame, JSON]</code>. The JSON structure is <code>{"id", "cmd", "args", "client": {"id", "name", "host"}}</code>. Replies are <code>[empty frame, {"id", "ok", "result"|"error", "code"?}, binary parts...]</code>.</p>
 <div class="table-wrap"><table>
 <tr><th>cmd</th><th>args</th><th>result</th></tr>
-<tr><td>ping</td><td>–</td><td>protocol, server_time, simulated（keepalive にも使用）</td></tr>
-<tr><td>acquire_control</td><td>force?</td><td>{holder, holder_id, since}。拒否時 code="control_denied"</td></tr>
-<tr><td>release_control / get_control</td><td>–</td><td>現在の持ち主または null</td></tr>
-<tr><td>get_info</td><td>–</td><td>型番、シリアル、センサーサイズ、アンプと HS 速度、VS 速度、プリアンプゲイン、EM ゲイン範囲、温度範囲、利用可能なトリガモード、機能フラグ</td></tr>
-<tr><td>get_settings</td><td>–</td><td>全設定（<a href="#settings">7章</a>）</td></tr>
-<tr><td>set_settings</td><td>settings: {部分}</td><td>settings, warnings, timings。不正なキーや値があれば全体を拒否。連続取得中なら再スタート、キネティック run 中はエラー</td></tr>
-<tr><td>get_status</td><td>–</td><td>state, temperature_c（CCD センサー）, temperature_status, cooler_on, target_temperature_c, fan_mode, ambient_temperature_c, cooler_voltage_v, tec_overheat（読めないものは null）, thermal_alarm（ok / warning / alarm）, thermal_alarm_reason, thermal_alarm_count（<a href="#thermal">15 章</a>）, run_id, frames_in_run, frames_expected, fps, em_gain（実際に掛かっている EM ゲイン。オフ・通常アンプなら 0）, timings, last_error, control</td></tr>
+<tr><td>ping</td><td>–</td><td>protocol, server_time, simulated; also used for keepalive</td></tr>
+<tr><td>acquire_control</td><td>force?</td><td>{holder, holder_id, since}; code="control_denied" if refused</td></tr>
+<tr><td>release_control / get_control</td><td>–</td><td>Current holder or null</td></tr>
+<tr><td>get_info</td><td>–</td><td>Model, serial number, sensor dimensions, amplifiers and HS speeds, VS speeds, preamp gains, EM gain range, temperature range, available trigger modes, and capability flags</td></tr>
+<tr><td>get_settings</td><td>–</td><td>All settings (<a href="#settings">section 7</a>)</td></tr>
+<tr><td>set_settings</td><td>settings: {partial update}</td><td>settings, warnings, timings. Invalid keys or values reject the whole request. Continuous acquisition restarts; changes during a kinetic run return an error.</td></tr>
+<tr><td>get_status</td><td>–</td><td>state, temperature_c (CCD sensor), temperature_status, cooler_on, target_temperature_c, fan_mode, ambient_temperature_c, cooler_voltage_v, tec_overheat (unavailable values are null), thermal_alarm (ok / warning / alarm), thermal_alarm_reason, thermal_alarm_count (<a href="#thermal">section 15</a>), run_id, frames_in_run, frames_expected, fps, em_gain (applied EM gain; 0 when disabled or using the conventional amplifier), timings, last_error, control</td></tr>
 <tr><td>start</td><td>settings?</td><td>run_id, expected, timings</td></tr>
-<tr><td>arm</td><td>n_frames, settings?</td><td>キネティック N 枚で開始（labscript 用）</td></tr>
+<tr><td>arm</td><td>n_frames, settings?</td><td>Start N kinetic frames, for labscript</td></tr>
 <tr><td>stop</td><td>–</td><td>stopped, run_id</td></tr>
-<tr><td>software_trigger</td><td>–</td><td>trigger_mode=software のとき 1 枚露光</td></tr>
-<tr><td>wait</td><td>run_id?, n_frames?, timeout_s</td><td>run 情報。期限切れは ok=false, code="timeout"</td></tr>
-<tr><td>fetch</td><td>run_id?, start, count</td><td>run, frames: [ヘッダ]。フレームごとにバイナリ部</td></tr>
-<tr><td>fetch_latest</td><td>after_seq?, run_id?</td><td>最新 0 または 1 フレーム</td></tr>
-<tr><td>get_runs</td><td>–</td><td>履歴にある run の一覧</td></tr>
-<tr><td>bench_payload</td><td>bytes</td><td>指定バイト数のバイナリ（転送性能測定用）</td></tr>
+<tr><td>software_trigger</td><td>–</td><td>Expose one frame when trigger_mode=software</td></tr>
+<tr><td>wait</td><td>run_id?, n_frames?, timeout_s</td><td>Run information; timeout returns ok=false, code="timeout"</td></tr>
+<tr><td>fetch</td><td>run_id?, start, count</td><td>run, frames: [headers], with one binary part per frame</td></tr>
+<tr><td>fetch_latest</td><td>after_seq?, run_id?</td><td>Zero or one latest frame</td></tr>
+<tr><td>get_runs</td><td>–</td><td>Runs retained in history</td></tr>
+<tr><td>bench_payload</td><td>bytes</td><td>Binary payload of the requested size, for transfer benchmarks</td></tr>
 </table></div>
-<p>データ：<code>[b"frame", ヘッダ JSON, 画素データ]</code> と <code>[b"status", status JSON]</code>。フレームヘッダ：<code>run_id, index</code>（run 内 0 始まり）<code>, seq</code>（全体連番。欠番＝取りこぼし）<code>, width, height, dtype</code>（uint16、累積/カウント変換時 int32）<code>, hbin, vbin, x0, y0</code>（センサー座標、1 始まり）<code>, exposure_s, em_gain</code>（実際のゲイン、オフなら 0）<code>, timestamp</code>（バックエンドが読み出した Unix 時刻）<code>, camera_time_s</code>（メタデータによる run 開始からの時間）<code>, temperature_c</code>。</p>
+<p>Data: <code>[b"frame", header JSON, pixel data]</code> and <code>[b"status", status JSON]</code>. Frame header fields: <code>run_id, index</code> (zero-based within a run), <code>seq</code> (global sequence number; gaps indicate losses), <code>width, height, dtype</code> (uint16, or int32 for accumulation/count conversion), <code>hbin, vbin, x0, y0</code> (one-based sensor coordinates), <code>exposure_s, em_gain</code> (applied gain, 0 if disabled), <code>timestamp</code> (Unix time when the backend read the frame), <code>camera_time_s</code> (metadata time since run start), and <code>temperature_c</code>.</p>
 
-<h2 id="settings">7. 設定項目</h2>
+<h2 id="settings">7. Settings</h2>
 <div class="table-wrap"><table>
-<tr><th>キー</th><th>値</th><th>SDK</th></tr>
+<tr><th>Key</th><th>Value</th><th>SDK</th></tr>
 <tr><td>acquisition_mode</td><td>single / accumulate / kinetic / continuous</td><td>SetAcquisitionMode 1/2/3/5</td></tr>
 <tr><td>trigger_mode</td><td>internal / external / external_start / external_exposure / software</td><td>SetTriggerMode 0/1/6/7/10</td></tr>
 <tr><td>fast_external_trigger, trigger_invert</td><td>bool</td><td>SetFastExtTrigger, SetTriggerInvert</td></tr>
-<tr><td>exposure_time_s</td><td>秒（external_exposure ではトリガのパルス幅で決まる）</td><td>SetExposureTime</td></tr>
-<tr><td>number_kinetics, kinetic_cycle_time_s</td><td>枚数、秒（0 で最速）</td><td>SetNumberKinetics, SetKineticCycleTime</td></tr>
-<tr><td>number_accumulations, accumulation_cycle_time_s</td><td>回数、秒</td><td>SetNumberAccumulations, SetAccumulationCycleTime</td></tr>
+<tr><td>exposure_time_s</td><td>Seconds; in external_exposure mode, determined by trigger pulse width</td><td>SetExposureTime</td></tr>
+<tr><td>number_kinetics, kinetic_cycle_time_s</td><td>Frame count, seconds (0 for fastest)</td><td>SetNumberKinetics, SetKineticCycleTime</td></tr>
+<tr><td>number_accumulations, accumulation_cycle_time_s</td><td>Accumulation count, seconds</td><td>SetNumberAccumulations, SetAccumulationCycleTime</td></tr>
 <tr><td>frame_transfer</td><td>bool</td><td>SetFrameTransferMode</td></tr>
-<tr><td>output_amplifier</td><td>0 EM, 1 通常</td><td>SetOutputAmplifier</td></tr>
-<tr><td>hs_speed_index, vs_speed_index (-1=推奨最速), vs_amplitude, preamp_gain_index</td><td>インデックス（get_info の一覧）</td><td>SetHSSpeed, SetVSSpeed, SetVSAmplitude, SetPreAmpGain</td></tr>
+<tr><td>output_amplifier</td><td>0 EM, 1 conventional</td><td>SetOutputAmplifier</td></tr>
+<tr><td>hs_speed_index, vs_speed_index (-1=fastest recommended), vs_amplitude, preamp_gain_index</td><td>Indices into the lists returned by get_info</td><td>SetHSSpeed, SetVSSpeed, SetVSAmplitude, SetPreAmpGain</td></tr>
 <tr><td>baseline_clamp</td><td>bool</td><td>SetBaselineClamp</td></tr>
-<tr><td>count_convert_mode, count_convert_wavelength_nm</td><td>0 カウント/1 電子/2 光子</td><td>SetCountConvertMode</td></tr>
-<tr><td>em_gain_enabled, em_gain, em_gain_mode, em_advanced</td><td>EM ゲインのオン/オフ（既定オフ）、ゲイン値、モード 0–3（0: DAC 0–255、1: DAC 0–4095、2: リニア、3: 実ゲイン）、bool（300 倍超を許可）</td><td>SetEMCCDGain, SetEMGainMode, SetEMAdvanced</td></tr>
-<tr><td>hbin, vbin, hstart, hend, vstart, vend</td><td>1 始まり、hend/vend=0 で端まで</td><td>SetImage</td></tr>
-<tr><td>isolated_crop, crop_width, crop_height</td><td>高速読み出し用の切り出し</td><td>SetIsolatedCropMode</td></tr>
+<tr><td>count_convert_mode, count_convert_wavelength_nm</td><td>0 counts / 1 electrons / 2 photons</td><td>SetCountConvertMode</td></tr>
+<tr><td>em_gain_enabled, em_gain, em_gain_mode, em_advanced</td><td>EM gain enabled (default off), gain value, mode 0–3 (0: DAC 0–255, 1: DAC 0–4095, 2: linear, 3: real gain), bool (allow gain above 300)</td><td>SetEMCCDGain, SetEMGainMode, SetEMAdvanced</td></tr>
+<tr><td>hbin, vbin, hstart, hend, vstart, vend</td><td>One-based; hend/vend=0 extends to the sensor edge</td><td>SetImage</td></tr>
+<tr><td>isolated_crop, crop_width, crop_height</td><td>Crop for faster readout</td><td>SetIsolatedCropMode</td></tr>
 <tr><td>cooler_on, target_temperature_c, fan_mode, cooler_persist_on_shutdown</td><td>bool, °C, full/low/off, bool</td><td>CoolerON/OFF, SetTemperature, SetFanMode, SetCoolerMode</td></tr>
-<tr><td>shutter_mode, shutter_ttl_high_open, shutter_opening_time_ms, shutter_closing_time_ms</td><td>auto/open/closed …（外部シャッタの TTL）</td><td>SetShutter</td></tr>
-<tr><td>metadata</td><td>bool（フレーム時刻）</td><td>SetMetaData</td></tr>
+<tr><td>shutter_mode, shutter_ttl_high_open, shutter_opening_time_ms, shutter_closing_time_ms</td><td>auto/open/closed, etc. (external shutter TTL)</td><td>SetShutter</td></tr>
+<tr><td>metadata</td><td>bool (frame timestamps)</td><td>SetMetaData</td></tr>
 </table></div>
-<p><b>EM ゲインのオン/オフ</b>：<code>em_gain_enabled=false</code> のとき、バックエンドは現在のモードの最小値（DAC モードでは 0＝増倍なし、リニア/実ゲインモードでは 1 倍）を <code>SetEMCCDGain</code> に渡し、<code>em_gain</code> の値は保持します。起動時の既定はオフです（強い光でゲインレジスタを劣化させないため）。オフのまま <code>em_gain</code> だけを送ると、設定は保存されますが警告が返ります。通常アンプ（<code>output_amplifier=1</code>）では EM ゲインは掛かりません。</p>
+<p><b>Enabling/disabling EM gain</b>: with <code>em_gain_enabled=false</code>, the backend passes the minimum for the current mode to <code>SetEMCCDGain</code> (0 in DAC modes for no multiplication, or 1 in linear/real-gain modes), while retaining the <code>em_gain</code> setpoint. Gain defaults to off to reduce gain-register degradation under bright illumination. Changing only <code>em_gain</code> while disabled saves the setpoint but returns a warning. The conventional amplifier (<code>output_amplifier=1</code>) does not apply EM gain.</p>
 
-<h2 id="perf">8. 性能</h2>
-<p>模擬カメラでの測定（<code>python/bench/bench_backend.py</code>）。</p>
+<h2 id="perf">8. Performance</h2>
+<p>Measurements with the simulated camera (<code>python/bench/bench_backend.py</code>).</p>
 <div class="table-wrap"><table>
-<tr><th>項目</th><th>IPC（同一ホスト）</th><th>TCP ループバック</th><th>Windows PC（LAN）</th></tr>
-<tr><td>ping 中央値 / p99</td><td>22 / 37 µs</td><td>36 / 55 µs</td><td id="winpc-ping">499 / 873 µs</td></tr>
-<tr><td>512×512 フレーム 1 枚の転送</td><td>0.037 ms</td><td>0.087 ms</td><td id="winpc-frame">5.2 ms</td></tr>
-<tr><td>run 100 枚の fetch（52 MB）</td><td>5.4 GB/s</td><td>2.4 GB/s</td><td id="winpc-fetch">114 MB/s（217 枚/s）</td></tr>
-<tr><td>ライブ全画面（36 fps）</td><td>取りこぼし 0、遅延 0.15 ms</td><td>取りこぼし 0、遅延 0.30 ms</td><td id="winpc-live">取りこぼし 0、遅延 4.7 ms</td></tr>
-<tr><td>ライブ 128×128 クロップ（約 500 fps）</td><td>取りこぼし 0、遅延 0.04 ms</td><td>取りこぼし 0、遅延 0.05 ms</td><td id="winpc-crop">取りこぼし 0、遅延 0.51 ms</td></tr>
+<tr><th>Measurement</th><th>IPC (same host)</th><th>TCP loopback</th><th>Windows PC (LAN)</th></tr>
+<tr><td>Ping median / p99</td><td>22 / 37 µs</td><td>36 / 55 µs</td><td id="winpc-ping">499 / 873 µs</td></tr>
+<tr><td>Transfer of one 512×512 frame</td><td>0.037 ms</td><td>0.087 ms</td><td id="winpc-frame">5.2 ms</td></tr>
+<tr><td>Fetch 100-frame run (52 MB)</td><td>5.4 GB/s</td><td>2.4 GB/s</td><td id="winpc-fetch">114 MB/s (217 frames/s)</td></tr>
+<tr><td>Full-frame live stream (36 fps)</td><td>0 lost, 0.15 ms latency</td><td>0 lost, 0.30 ms latency</td><td id="winpc-live">0 lost, 4.7 ms latency</td></tr>
+<tr><td>128×128 crop live stream (about 500 fps)</td><td>0 lost, 0.04 ms latency</td><td>0 lost, 0.05 ms latency</td><td id="winpc-crop">0 lost, 0.51 ms latency</td></tr>
 </table></div>
-<p>iXon3 897 の全画面 10 MHz 読み出しは約 18 MB/s で、Gigabit Ethernet（約 110 MB/s）に十分収まります。</p>
-<p>Windows PC（Windows 11、Python 3.10、1 GbE、2026-10-16 測定）では、大きな転送が 117 MB/s（0.94 Gbit/s）で回線の上限に達しています。全画面 1 枚（512 KiB）の転送 5.2 ms と、ライブ全画面の遅延 4.7 ms は、ほぼ回線上の転送時間（約 4.4 ms）です。ping の 0.5 ms は、Windows 側のネットワークスタックと Python の処理によるものです。高速化が必要なら、ROI を切り出す（128×128 で遅延 0.5 ms）か、10 GbE を使ってください。</p>
+<p>Full-frame iXon3 897 readout at 10 MHz uses about 18 MB/s, comfortably within Gigabit Ethernet's approximately 110 MB/s capacity.</p>
+<p>On the Windows PC (Windows 11, Python 3.10, 1 GbE; measured 2026-10-16), large transfers reached the link limit at 117 MB/s (0.94 Gbit/s). The 5.2 ms transfer time for a 512 KiB frame and 4.7 ms live latency are close to the approximately 4.4 ms wire time. The 0.5 ms ping includes Windows network-stack and Python overhead. For lower latency, use a smaller ROI (about 0.5 ms for 128×128) or 10 GbE.</p>
 
-<h3>8.1 実機（カメラPC）への LAN 接続（2026-10-16）</h3>
-<p>カメラPC（iXon DU897_BV、冷却オフ）のバックエンドに、プライベート LAN（1 GbE）経由で接続して測定しました。</p>
+<h3>8.1 LAN connection to the real camera PC (2026-10-16)</h3>
+<p>Measurements used the camera PC backend (iXon DU897_BV, cooling off) over a private 1 GbE LAN.</p>
 <div class="table-wrap"><table>
-<tr><th>項目</th><th>開発PC（Linux）→ カメラPC</th><th>Windows PC → カメラPC</th></tr>
-<tr><td>ping 中央値 / p99</td><td>112 / 139 µs</td><td>500 / 945 µs</td></tr>
-<tr><td>512×512 フレーム 1 枚の転送</td><td>4.7 ms</td><td>5.5 ms</td></tr>
-<tr><td>run 100 枚の fetch（52 MB）</td><td>108 MB/s（206 枚/s）</td><td>113 MB/s（216 枚/s）</td></tr>
-<tr><td>ライブ全画面（31.2 fps）</td><td>取りこぼし 0、遅延 4.7 ms</td><td>取りこぼし 0、遅延 4.7 ms</td></tr>
-<tr><td>ライブ 128×128 isolated crop（283 fps）</td><td>取りこぼし 0、遅延 1.6 ms</td><td>取りこぼし 0、遅延 1.3 ms</td></tr>
+<tr><th>Measurement</th><th>Development PC (Linux) → camera PC</th><th>Windows PC → camera PC</th></tr>
+<tr><td>Ping median / p99</td><td>112 / 139 µs</td><td>500 / 945 µs</td></tr>
+<tr><td>Transfer of one 512×512 frame</td><td>4.7 ms</td><td>5.5 ms</td></tr>
+<tr><td>Fetch 100-frame run (52 MB)</td><td>108 MB/s (206 frames/s)</td><td>113 MB/s (216 frames/s)</td></tr>
+<tr><td>Full-frame live stream (31.2 fps)</td><td>0 lost, 4.7 ms latency</td><td>0 lost, 4.7 ms latency</td></tr>
+<tr><td>128×128 isolated crop live stream (283 fps)</td><td>0 lost, 1.6 ms latency</td><td>0 lost, 1.3 ms latency</td></tr>
 </table></div>
-<p>GUI は Linux（開発PC）と Windows PCの両方から TCP でライブ表示でき、表示も 31.2 fps でカメラに追従しました。最初は Windows で表示が 21 fps に落ちていました。原因は表示更新のタイマー（33 ms）で、Windows の既定の粗いタイマー（約 15.6 ms 刻み）がカメラの周期とずれていました。高精度タイマーの 16 ms（表示の上限は約 60 fps）に変えて解決しました。ROI の解析と UDP 送信は、表示と関係なく全フレームで行います。frame transfer で内部トリガの連続取得では、露光時間は読み出し時間より短くなりません（10 ms を指定しても実際は 30.3 ms。Status の Timings に表示）。</p>
+<p>The GUI displayed live TCP streams on both the Linux development PC and Windows PC at the camera's 31.2 fps. Windows initially displayed only 21 fps because its coarse default timer resolution, about 15.6 ms, caused the 33 ms display timer to drift relative to camera frames. Switching to a precise 16 ms timer, with a display limit near 60 fps, resolved this. ROI analysis and UDP output process every frame independently of display timing. During internally triggered continuous acquisition with frame transfer, exposure cannot be shorter than readout: requesting 10 ms gave an actual exposure of 30.3 ms, shown in Status's Timings.</p>
 
-<h2 id="hardware">9. 実機で確認すること</h2>
-<p>コードは SDK 2.104 のヘッダとマニュアルに沿って書き、Fable 5.1 によるレビューを反映済みです。マニュアルから決められない点は実機で確認してください。</p>
+<h2 id="hardware">9. Hardware verification</h2>
+<p>The code was written against the SDK 2.104 headers and manual and incorporates a Fable 5.1 review. Verify behavior that the manual does not establish on the actual camera.</p>
 <ol>
-<li><b>ドライバ</b>：<code>andordrvlx</code> のビルドとロード、<code>/dev/andordrvlx0</code> の権限（andor グループ）。<code>journalctl -u andor-emccd-backend</code> に <code>camera: iXon ... serial ...</code> が出ること。</li>
-<li><b>取得の基本</b>：internal / continuous で Live、single、kinetic N 枚が期待どおりのフレーム数になること（GUI の Status と <code>get_runs</code>）。</li>
-<li><b>GetImages の範囲</b>：<code>GetNumberNewImages</code> の番号が run ごとに 1 から始まること。「circular buffer overrun」「GetImages returned ... retrying」の警告がログに出ないこと（出た場合は報告を）。</li>
-<li><b>メタデータ時刻</b>：<code>camera_time_s</code> が null でなく、フレーム間隔がサイクル時間に一致すること（<code>GetMetaDataInfo</code> の番号の基準が未記載のため、0 始まりを先に試し、だめなら 1 始まりを使う実装）。CCI-23 でメタデータが使えるかも確認。</li>
-<li><b>累積モード</b>：accumulate N 回で 1 枚の int32 の和が返ること（<code>GetAcquiredData</code>）。</li>
-<li><b>外部トリガ</b>：external（各エッジで露光）、external_start、external_exposure（パルス幅が露光時間。frame transfer は機能ビットが無ければ自動で off）、fast_external_trigger、trigger_invert。labscript からの arm → トリガ → 取得。</li>
-<li><b>ソフトウェアトリガ</b>：continuous モードでのみ有効（SDK の制約）。</li>
-<li><b>Isolated crop</b>：同じ大きさの通常のサブ画像より速くなること、画像の大きさが一致すること、切り出す角の位置。</li>
-<li><b>EM ゲイン</b>：モードごとの範囲（<code>get_info</code> の em_gain_range）と、advanced の可否。オフ（最小値）で信号が通常アンプ相当になり、オンで設定値どおりに増えること。</li>
-<li><b>シャッタ</b>：外部シャッタの TTL（SetShutterEx / SetShutter を機能ビットで選択）。</li>
-<li><b>冷却</b>：目標温度への到達と安定（status の色）、取得中も温度が読めるか（読めない機種は直前の値を保持）。サービス停止時に -20 °C まで昇温してから ShutDown すること（2 回目のシグナルで中断）。起動時、冷却が動いていればそのまま維持すること。ヘッドの温度と TE クーラーの電圧が得られるか（ログの <code>thermal readouts:</code>、<a href="#thermal">15 章</a>）。</li>
-<li><b>カウント変換</b>：electrons / photons で int32 データが返ること。</li>
-<li><b>性能</b>：全画面 10 MHz で約 35 fps、クロップ時のフレームレート、LAN 経由の取りこぼし 0。</li>
+<li><b>Driver</b>: build and load <code>andordrvlx</code>, check <code>/dev/andordrvlx0</code> permissions for the andor group, and confirm <code>camera: iXon ... serial ...</code> in <code>journalctl -u andor-emccd-backend</code>.</li>
+<li><b>Basic acquisition</b>: verify Live in internal/continuous mode, single frames, and N-frame kinetic runs using GUI Status and <code>get_runs</code>.</li>
+<li><b>GetImages ranges</b>: verify that <code>GetNumberNewImages</code> indices restart at 1 for each run. Report any “circular buffer overrun” or “GetImages returned ... retrying” log warnings.</li>
+<li><b>Metadata timestamps</b>: verify non-null <code>camera_time_s</code> and frame intervals matching the cycle time. Because the index base of <code>GetMetaDataInfo</code> is undocumented, the implementation tries zero-based indices first, then one-based indices. Also check metadata availability on CCI-23 hardware.</li>
+<li><b>Accumulation</b>: accumulating N exposures should return one int32 sum through <code>GetAcquiredData</code>.</li>
+<li><b>External triggers</b>: test external (one exposure per edge), external_start, external_exposure (pulse width defines exposure; frame transfer is automatically disabled without the capability flag), fast_external_trigger, and trigger_invert. Verify the labscript arm → trigger → retrieval sequence.</li>
+<li><b>Software trigger</b>: available only in continuous mode, an SDK limitation.</li>
+<li><b>Isolated crop</b>: verify higher frame rates than a normal subimage of the same size, correct dimensions, and the corner from which cropping occurs.</li>
+<li><b>EM gain</b>: verify each mode's range (<code>get_info</code>, em_gain_range), advanced support, approximately conventional-amplifier signal levels with gain off/minimum, and increased signal when enabled.</li>
+<li><b>Shutter</b>: verify external shutter TTL. The implementation selects SetShutterEx / SetShutter using capability flags.</li>
+<li><b>Cooling</b>: verify target attainment and stabilization, status colors, and temperature reads during acquisition. Unsupported cameras retain the previous reading. Verify warm-up to -20 °C before ShutDown when stopping the service; a second signal interrupts warm-up. Existing cooling should be preserved at startup. Check head temperature and TE cooler voltage in the <code>thermal readouts:</code> log (<a href="#thermal">section 15</a>).</li>
+<li><b>SDK count conversion</b>: electrons / photons should return int32 data.</li>
+<li><b>Performance</b>: check approximately 35 fps at full-frame 10 MHz, crop frame rates, and zero LAN losses.</li>
 </ol>
 
-<h3>9.1 カメラPCでの確認結果（2026-10-16、冷却オフ）</h3>
-<p>カメラ：iXon DU897_BV、コントローラ CCI-24（PCI ID <code>149a:0008</code>、ドライバ上は PCIe3201）、SDK 2.103.30058.0、ドライバ 4.7.0.0（パッチ適用）。水冷ユニットが止まっていたため冷却はオフのままで、センサー温度は 21 °C から 26.5 °C で頭打ちになりました。光は入れていません（暗画像。バイアス約 99、標準偏差 1.8）。</p>
+<h3>9.1 Camera PC results (2026-10-16, cooling off)</h3>
+<p>Camera: iXon DU897_BV, CCI-24 controller (PCI ID <code>149a:0008</code>, identified by the driver as PCIe3201), SDK 2.103.30058.0, patched driver 4.7.0.0. Cooling stayed off because the water-cooling unit was stopped. Sensor temperature rose from 21 °C and plateaued at 26.5 °C. No illumination was applied; dark images had a bias near 99 and standard deviation 1.8.</p>
 <table>
-<tr><th>項目</th><th>結果</th></tr>
-<tr><td>ドライバ</td><td>ビルド・ロード OK。<code>/dev/andordrvlx0</code>、BusMaster+、DMA_MODE=1（<code>dma_alloc_coherent</code>）。取得中のエラーなし。</td></tr>
-<tr><td>取得の基本</td><td>single、kinetic（100〜2000 枚）、continuous（Live）すべて期待どおりの枚数で、通し番号の抜けなし。ログに overrun や retry の警告なし。</td></tr>
-<tr><td>全画面の速度</td><td>10 MHz、frame transfer で 31.2 fps（間隔 32.0 ± 0.4 ms）。マニュアル値の約 35 fps よりやや低いのは、推奨の VS 速度（3.3 µs）を使っているためと考えられます。</td></tr>
-<tr><td>サブ画像・クロップ</td><td>512×128 は通常のサブ画像で 105 fps、isolated crop で 122 fps。isolated crop の 128×128 で 284 fps、32×32 で 888 fps。冷却していないため、isolated crop の画像は暗電流で平均約 317 になります（読まれない領域の電荷のため。冷却時に再確認）。</td></tr>
-<tr><td>累積</td><td><code>acquisition_mode=accumulate</code> の 5 回で、int32 の和（平均 498、1 回は約 100）。kinetic（arm）で <code>number_accumulations</code> を指定すると無視されるので、警告を返すようにしました。</td></tr>
-<tr><td>ソフトウェアトリガ</td><td>continuous で 5 回送って 5 枚。</td></tr>
-<tr><td>EM ゲイン</td><td>DAC モード（em_gain_mode 0）の範囲は常温で 1〜153（−80 °C では 1〜71、9.2 節）。オン 30 でも暗画像はほぼ変わらず（平均 99 → 101）。光を入れた確認は未実施。</td></tr>
-<tr><td>メタデータ</td><td>このカメラでは使えません（<code>has_metadata=false</code>、<code>camera_time_s</code> は null）。ホスト側の <code>timestamp</code> は、まとめて読み出した分が同じ時刻になります（高速時）。</td></tr>
-<tr><td>カウント変換</td><td>既定の設定では使えず、「baseline clamp が必要」と警告を返して通常のデータになります。</td></tr>
-<tr><td>LAN</td><td>開発PC と Windows PC から取りこぼし 0（8.1 節）。GUI のライブ表示も確認。</td></tr>
-<tr><td>未確認</td><td>冷却（9.2 節で実施）、外部トリガ、光を入れた EM ゲインの確認。</td></tr>
+<tr><th>Item</th><th>Result</th></tr>
+<tr><td>Driver</td><td>Build and load succeeded. <code>/dev/andordrvlx0</code>, BusMaster+, DMA_MODE=1 with <code>dma_alloc_coherent</code>. No acquisition errors.</td></tr>
+<tr><td>Basic acquisition</td><td>Single, kinetic (100–2000 frames), and continuous (Live) produced the expected frame counts with no sequence gaps, overruns, or retry warnings.</td></tr>
+<tr><td>Full-frame rate</td><td>31.2 fps at 10 MHz with frame transfer, intervals 32.0 ± 0.4 ms. The slightly lower rate than the manual's approximately 35 fps was attributed to the recommended 3.3 µs VS speed.</td></tr>
+<tr><td>Subimages and crops</td><td>512×128: 105 fps for a normal subimage, 122 fps for isolated crop. Isolated crop: 284 fps at 128×128 and 888 fps at 32×32. Without cooling, isolated-crop images averaged about 317 because of dark charge from unread regions; recheck when cooled.</td></tr>
+<tr><td>Accumulation</td><td>Five accumulations with <code>acquisition_mode=accumulate</code> returned an int32 sum, mean 498 versus about 100 per exposure. <code>number_accumulations</code> is ignored in kinetic/arm mode, so a warning was added.</td></tr>
+<tr><td>Software trigger</td><td>Five triggers in continuous mode produced five frames.</td></tr>
+<tr><td>EM gain</td><td>DAC mode (em_gain_mode 0) ranged from 1–153 at room temperature, versus 1–71 at −80 °C in section 9.2. Setting 30 changed dark-image means only slightly, 99 → 101. Testing with illumination was pending.</td></tr>
+<tr><td>Metadata</td><td>Unavailable on this camera: <code>has_metadata=false</code>, <code>camera_time_s</code> is null. At high rates, frames read together share the same host <code>timestamp</code>.</td></tr>
+<tr><td>SDK count conversion</td><td>Unavailable with default settings; returns a warning that baseline clamp is required and falls back to ordinary data.</td></tr>
+<tr><td>LAN</td><td>No losses from the development PC or Windows PC (section 8.1). GUI live display also verified.</td></tr>
+<tr><td>Pending at that time</td><td>Cooling (subsequently tested in section 9.2), external triggering, and EM gain with illumination.</td></tr>
 </table>
 
-<h3>9.2 冷却と暗電流・ノイズ（2026-10-21、水冷あり）</h3>
-<p>水冷ユニットを接続し、目標 −80 °C、ファン full で冷却しました（<code>python/bench/cool_down.py</code>）。26.5 °C から 256 秒で −79 °C、一度 −87.7 °C まで行き過ぎてから戻り、約 600 秒で「stabilized」（−79.9〜−79.25 °C。温度の読みは 0.65 °C 刻み）。測定は暗画像（キャップ）、全画面 512×512 の中央 384×384、EM アンプ、10 MHz、プリアンプ index 0、フレーム転送なしの kinetic シリーズ（<code>dark_noise.py</code>）。ノイズは連続 2 フレームの差 /√2 の標準偏差（固定パターンを含まない時間的ノイズ）。</p>
+<h3>9.2 Cooling, dark current, and noise (2026-10-21, water cooling)</h3>
+<p>With the water-cooling unit connected, the target was −80 °C and the fan was full (<code>python/bench/cool_down.py</code>). Temperature fell from 26.5 °C to −79 °C in 256 seconds, overshot to −87.7 °C, and stabilized after about 600 seconds at −79.9 to −79.25 °C; readings have 0.65 °C steps. Measurements used capped dark images, the central 384×384 pixels of full 512×512 frames, the EM amplifier at 10 MHz, preamp index 0, and kinetic series without frame transfer (<code>dark_noise.py</code>). Noise is the standard deviation of consecutive-frame differences divided by √2, measuring temporal noise without fixed-pattern contributions.</p>
 <table>
-<tr><th>EM ゲインなし</th><th>常温 24.6 °C（冷却オフ）</th><th>−80 °C</th></tr>
-<tr><td>レベル 0.01 s / 1 s / 5 s</td><td>98.0 / 128.2 / 271.5 ADU</td><td>98.5 / 98.0 / 97.8 ADU</td></tr>
-<tr><td>暗電流</td><td>34.9 ADU/画素/s（≈ 310〜1000 e⁻/画素/s、換算係数による）</td><td>EM ゲインなしでは測定限界以下。EM 計数で 0.020 e⁻/画素/s（下記）</td></tr>
-<tr><td>ノイズ 0.01 s（読み出しノイズ）</td><td>1.66 ADU</td><td>1.62 ADU</td></tr>
-<tr><td>ノイズ 1 s / 5 s</td><td>2.46 / 4.74 ADU</td><td>1.81 / 1.73 ADU</td></tr>
-<tr><td>固定パターン 5 s（フレーム平均の画素間ばらつき）</td><td>9.4 ADU</td><td>0.74 ADU</td></tr>
-<tr><td>ホットピクセル 5 s（平均がレベル + 10σ/√6 超）</td><td>7.2 %</td><td>0 %</td></tr>
-<tr><td>EM ゲイン DAC 100、1 s：レベル / ノイズ</td><td>765.5 / 38.6 ADU</td><td>101.0 / 12.1 ADU</td></tr>
+<tr><th>EM gain disabled</th><th>Room temperature, 24.6 °C (cooling off)</th><th>−80 °C</th></tr>
+<tr><td>Level at 0.01 s / 1 s / 5 s</td><td>98.0 / 128.2 / 271.5 ADU</td><td>98.5 / 98.0 / 97.8 ADU</td></tr>
+<tr><td>Dark current</td><td>34.9 ADU/pixel/s (approximately 310–1000 e⁻/pixel/s, depending on the conversion factor)</td><td>Below the measurement limit without EM gain; 0.020 e⁻/pixel/s by EM counting, below</td></tr>
+<tr><td>Noise at 0.01 s (read noise)</td><td>1.66 ADU</td><td>1.62 ADU</td></tr>
+<tr><td>Noise at 1 s / 5 s</td><td>2.46 / 4.74 ADU</td><td>1.81 / 1.73 ADU</td></tr>
+<tr><td>Fixed pattern at 5 s (pixel variation in the frame average)</td><td>9.4 ADU</td><td>0.74 ADU</td></tr>
+<tr><td>Hot pixels at 5 s (mean above level + 10σ/√6)</td><td>7.2 %</td><td>0 %</td></tr>
+<tr><td>EM gain DAC 100, 1 s: level / noise</td><td>765.5 / 38.6 ADU</td><td>101.0 / 12.1 ADU</td></tr>
 </table>
-<p>換算係数：常温の暗電流のショットノイズ（分散の増加 / 信号）からは約 9〜11 e⁻/ADU ですが、EM アンプでは「EM ゲインオフ」でもわずかに増倍がかかるため小さく出ている可能性があります。カタログの読み出しノイズ（iXon3 897：49 e⁻ @ 10 MHz）を 1.6 ADU に当てはめると約 30 e⁻/ADU です。正確な値は付属の Performance Sheet か、一様光でのフォトントランスファーで確認してください。以下の e⁻ 換算（常温の暗電流、EM ゲイン倍率）はこの不確かさ（約 3 倍）を含みます。EM 単一電子計数の結果（暗電流、CIC）は換算係数によりません。</p>
-<p><b>−80 °C の暗電流（EM 単一電子計数、<code>em_count.py</code>）</b>：5σ を超える画素をイベントとし、指数分布の裾から 1 電子あたりの ADU を求め、しきい値以下の割合を補正。露光 0.001〜10 s の傾きが暗電流、切片がクロック誘起電荷（CIC）です。</p>
+<p>Conversion-factor uncertainty: room-temperature dark-current shot noise, using variance increase divided by signal, suggested about 9–11 e⁻/ADU. This may be biased low if the EM amplifier retains some multiplication even with EM gain disabled. Applying the catalog read noise for the iXon3 897, 49 e⁻ at 10 MHz, to 1.6 ADU instead gives about 30 e⁻/ADU. Establish the correct value from the supplied Performance Sheet or a photon-transfer measurement under uniform illumination. The electron-unit estimates below for room-temperature dark current and physical EM gain carry this roughly threefold uncertainty. EM single-electron counting estimates of dark current and CIC do not depend on this conversion factor.</p>
+<p><b>Dark current at −80 °C by EM single-electron counting (<code>em_count.py</code>)</b>: pixels above 5σ were counted as events. ADU per electron was estimated from the exponential tail, then used to correct for events below threshold. The slope over 0.001–10 s exposures estimates dark current; the intercept estimates clock-induced charge (CIC).</p>
 <table>
-<tr><th>条件</th><th>暗電流</th><th>CIC</th></tr>
-<tr><td>部屋の照明あり、シャッター closed、DAC モード 71（約 17.5 ADU/e⁻、検出率 58〜62 %）</td><td>0.020 e⁻/画素/s</td><td>0.15 e⁻/画素/フレーム</td></tr>
-<tr><td>部屋の照明なし、シャッター closed、DAC 71</td><td>0.019 e⁻/画素/s</td><td>0.14 e⁻/画素/フレーム</td></tr>
-<tr><td>部屋の照明なし、シャッター auto（露光中は開）、DAC 71</td><td>0.021 e⁻/画素/s</td><td>0.15 e⁻/画素/フレーム</td></tr>
-<tr><td>シャッター auto（露光中は開）、real gain 200（補正なし）</td><td>0.0095 イベント/画素/s</td><td>—</td></tr>
-<tr><td>シャッター closed、real gain 200（補正なし）</td><td>0.0019 イベント/画素/s</td><td>—</td></tr>
+<tr><th>Condition</th><th>Dark current</th><th>CIC</th></tr>
+<tr><td>Room lights on, shutter closed, DAC mode 71 (about 17.5 ADU/e⁻, 58–62 % detection)</td><td>0.020 e⁻/pixel/s</td><td>0.15 e⁻/pixel/frame</td></tr>
+<tr><td>Room lights off, shutter closed, DAC 71</td><td>0.019 e⁻/pixel/s</td><td>0.14 e⁻/pixel/frame</td></tr>
+<tr><td>Room lights off, shutter auto (open during exposure), DAC 71</td><td>0.021 e⁻/pixel/s</td><td>0.15 e⁻/pixel/frame</td></tr>
+<tr><td>Shutter auto (open during exposure), real gain 200, without correction</td><td>0.0095 events/pixel/s</td><td>—</td></tr>
+<tr><td>Shutter closed, real gain 200, without correction</td><td>0.0019 events/pixel/s</td><td>—</td></tr>
 </table>
 <ul>
-<li>冷却で暗電流は 1/15000〜1/50000 になり（310〜1000 → 0.02 e⁻/画素/s）、長時間露光のノイズ・固定パターン・ホットピクセルは消えました。EM ゲインなしでは 5 s 露光でも読み出しノイズだけです。</li>
-<li>カタログ値（iXon Ultra 897：−80 °C で 0.00030 e⁻/画素/s、spurious background 0.0018 イベント/画素 @ 1000 倍・−85 °C）より、暗電流は約 60 倍、CIC は 45〜80 倍高い値です（iXon3 897 のパンフレットには数値なし）。部屋の照明を消しても、シャッターを閉じても変わらない（0.019〜0.021）ので、光漏れではありません。常温の 310 e⁻/画素/s から「約 6〜7 °C で半減」で外挿すると −80 °C で 0.002〜0.005 程度なので、この個体の −80 °C での実力か、計数法の系統誤差（しきい値以下の補正、1 電子あたり ADU の露光時間依存 16→19）と考えられます。CIC 0.15 e⁻/フレームが高いのは、既定の縦方向転送速度（SDK 推奨の index 4 = 3.3 µs、最も遅い）のためでした。0.3 µs にすると 0.006 e⁻/フレームになります（9.3 節）。</li>
-<li><b>部屋の照明がついているときにシャッターを開けたまま（auto）だと、イベント率が 5 倍</b>でした（同じ設定で 0.0095 と 0.0019 イベント/画素/s）。照明を消すと開けても変わらないので、部屋の光がキャップ越しに入っていました。暗画像は <code>shutter_mode: closed</code> で撮ってください。auto ではフレームごとにシャッターが開閉します（kinetic・フレーム転送なしで音がするのはこのため）。</li>
-<li><b>real gain モード（em_gain_mode 3）の EM ゲイン</b>（<code>em_scan.py</code>）：1 電子あたり 50 → 1.4、100 → 2.6、200 → 3.8、300 → 5.7 ADU。30 e⁻/ADU なら設定 200 で約 115 倍、300 で約 170 倍（設定の 6〜8 割）、9〜11 e⁻/ADU なら 40〜60 倍です。DAC モード 71 では 17.8 ADU/e⁻。換算係数を確定するまで、ゲインは単一電子の分布か光源で確認してください。−80 °C では DAC モードの上限が 71 に制限されました（常温では 153）。</li>
+<li>Cooling reduced dark current by a factor of 15,000–50,000 (310–1000 → 0.02 e⁻/pixel/s), eliminating the observed long-exposure noise, fixed pattern, and hot pixels. With EM gain disabled, even 5 s exposures were read-noise limited.</li>
+<li>Measured dark current was about 60 times, and CIC 45–80 times, the iXon Ultra 897 catalog values: 0.00030 e⁻/pixel/s at −80 °C and spurious background 0.0018 events/pixel at gain 1000 and −85 °C. The iXon3 897 brochure gives no corresponding numbers. Turning off room lights and closing the shutter left the measured 0.019–0.021 unchanged, arguing against light leakage. Extrapolating 310 e⁻/pixel/s at room temperature with a halving every 6–7 °C gives about 0.002–0.005 at −80 °C. The higher measurement may reflect this particular camera or systematic counting errors, including the below-threshold correction and exposure-dependent ADU/e⁻ of 16 → 19. The high CIC of 0.15 e⁻/frame was traced to the default vertical shift speed: SDK-recommended index 4, 3.3 µs, the slowest setting. Using 0.3 µs reduced it to 0.006 e⁻/frame (section 9.3).</li>
+<li><b>With room lights on and the shutter in auto, the event rate was five times higher</b>: 0.0095 versus 0.0019 events/pixel/s at otherwise identical settings. Opening the shutter with room lights off made no difference, indicating room light passing through the cap. Use <code>shutter_mode: closed</code> for dark frames. Auto opens and closes the shutter for every frame, explaining the sound during kinetic acquisition without frame transfer.</li>
+<li><b>EM gain in real-gain mode (em_gain_mode 3)</b>, measured by <code>em_scan.py</code>: setpoints 50, 100, 200, and 300 gave 1.4, 2.6, 3.8, and 5.7 ADU per input electron. Assuming 30 e⁻/ADU implies physical gains of about 115 at setpoint 200 and 170 at 300, or 60–80 % of the setpoint; assuming 9–11 e⁻/ADU instead gives gains around 40–60. DAC mode 71 gave 17.8 ADU/e⁻. Until the conversion factor is established, verify gain using the single-electron distribution or an illumination source. The DAC upper limit was 71 at −80 °C versus 153 at room temperature.</li>
 </ul>
 
-<h3>9.3 冷却時の条件別試験（2026-10-21、水冷あり）</h3>
-<p>キャップ、シャッター closed、全画面の中央 384×384、フレーム転送なし（<code>python/bench/cold_survey.py</code>、手順は <code>bench/run_cold_survey.sh</code>）。最後に冷却をオフにしました。単一電子計数は 9.2 節と同じ方法です。</p>
-<p><b>到達温度</b>：目標 −100 °C、ファン full で 26.5 °C から約 6 分で −87.7 °C に達し、そこで止まりました（10 分以上変化なし、「not_reached」）。この水冷条件で安定して使える下限は −85 °C です（−85 °C 目標で −86.4〜−85.1 °C に安定）。</p>
-<p><b>読み出しノイズとバイアス</b>（EM ゲインなし、1 ms、ADU）：</p>
+<h3>9.3 Survey of cooled operating conditions (2026-10-21, water cooling)</h3>
+<p>Measurements used a cap, shutter closed, the central 384×384 pixels of full frames, and no frame transfer (<code>python/bench/cold_survey.py</code>; procedure in <code>bench/run_cold_survey.sh</code>). Cooling was turned off at the end. Single-electron counting used the method in section 9.2.</p>
+<p><b>Lowest temperature</b>: with a −100 °C target and full fan, the sensor reached −87.7 °C from 26.5 °C in about 6 minutes, then stopped cooling further for more than 10 minutes with status “not_reached”. Under these water-cooling conditions, −85 °C was the lowest stable operating target, stabilizing between −86.4 and −85.1 °C.</p>
+<p><b>Read noise and bias</b> (EM gain off, 1 ms, ADU):</p>
 <table>
-<tr><th>アンプ、速度、プリアンプ</th><th>常温 26.5 °C</th><th>−20 °C</th><th>−70 °C</th><th>−85 °C</th></tr>
+<tr><th>Amplifier, speed, preamp</th><th>Room temperature, 26.5 °C</th><th>−20 °C</th><th>−70 °C</th><th>−85 °C</th></tr>
 <tr><td>EM 10 MHz ×1.0</td><td>94 / 1.72</td><td>96 / 1.65</td><td>98 / 1.62</td><td>98 / 1.59</td></tr>
-<tr><td>EM 10 MHz ×2.4</td><td><b>画像が一定（100）</b></td><td><b>一定</b></td><td>105 / 2.37</td><td>108 / 2.42</td></tr>
-<tr><td>EM 10 MHz ×5.1</td><td><b>一定</b></td><td><b>一定</b></td><td><b>一定</b></td><td>119 / 4.03</td></tr>
-<tr><td>EM 5 MHz ×1.0 / ×2.4 / ×5.1</td><td>1.89 / 2.83 / <b>一定</b></td><td>1.80 / 2.47 / 4.03</td><td>1.77 / 2.27 / 4.05</td><td>1.81 / 2.38 / 4.18</td></tr>
+<tr><td>EM 10 MHz ×2.4</td><td><b>Constant image (100)</b></td><td><b>Constant</b></td><td>105 / 2.37</td><td>108 / 2.42</td></tr>
+<tr><td>EM 10 MHz ×5.1</td><td><b>Constant</b></td><td><b>Constant</b></td><td><b>Constant</b></td><td>119 / 4.03</td></tr>
+<tr><td>EM 5 MHz ×1.0 / ×2.4 / ×5.1</td><td>1.89 / 2.83 / <b>Constant</b></td><td>1.80 / 2.47 / 4.03</td><td>1.77 / 2.27 / 4.05</td><td>1.81 / 2.38 / 4.18</td></tr>
 <tr><td>EM 3 MHz ×1.0 / ×2.4 / ×5.1</td><td>1.33 / 2.42 / 4.90</td><td>1.13 / 1.75 / 3.20</td><td>1.19 / 1.72 / 3.29</td><td>1.17 / 1.80 / 3.32</td></tr>
 <tr><td>Conventional 3 MHz ×1.0 / ×2.4 / ×5.1</td><td>1.63 / 3.34 / 7.15</td><td>1.43 / 2.68 / 5.59</td><td>1.44 / 2.68 / 5.47</td><td>1.42 / 2.71 / 5.53</td></tr>
 </table>
 <ul>
-<li><b>「一定」</b>：全画素がちょうど 100 になり、ノイズ 0。ベースラインクランプを切ると全画素 0 になるので、ADC の入力が下限より下に外れ、クランプが一律 100 を出しています。SDK（IsPreAmpGainAvailable）は使用可と答え、警告も出ません。どの組み合わせで起きるかは温度によります（温かいほど、速く高いプリアンプほど起きる）。10 MHz で ×2.4 以上を使うときは −70 °C 以下に冷やしてください。</li>
-<li>冷却で読み出しノイズはほとんど変わりません（10 MHz ×1.0 で 1.72 → 1.59 ADU）。3 MHz は 10 MHz より約 3 割低い値です。プリアンプを上げると ADU で見たノイズは増えますが、ADU あたりの電子数が減るため、電子数で見たノイズは下がります。</li>
+<li><b>“Constant”</b> means every pixel was exactly 100, with zero noise. Disabling baseline clamp changed every pixel to 0, indicating the ADC input was below its lower limit and the clamp produced a uniform 100. The SDK's IsPreAmpGainAvailable still reported these combinations as available, without warnings. The affected combinations depended on temperature; warmer operation, faster readout, and higher preamp gain made the problem more likely. Cool to −70 °C or below before using preamp ×2.4 or higher at 10 MHz.</li>
+<li>Cooling changed read noise little: 1.72 → 1.59 ADU at 10 MHz ×1.0. At 3 MHz it was about 30 % lower than at 10 MHz. Higher preamp gain increases noise expressed in ADU, but lowers electrons per ADU, so noise expressed in electrons decreases.</li>
 </ul>
-<p><b>CIC と縦方向転送</b>（−85 °C、EM DAC 67（上限）、10 MHz ×1.0、1 ms、40 フレーム、e⁻/画素/フレーム）：</p>
+<p><b>CIC and vertical shift</b> (−85 °C, EM DAC 67 at the upper limit, 10 MHz ×1.0, 1 ms, 40 frames; e⁻/pixel/frame):</p>
 <table>
-<tr><th>縦方向転送速度</th><th>Normal</th><th>+1</th><th>+2</th><th>+3</th><th>+4</th></tr>
+<tr><th>Vertical shift speed</th><th>Normal</th><th>+1</th><th>+2</th><th>+3</th><th>+4</th></tr>
 <tr><td>0.3 µs</td><td><b>0.0061</b></td><td>0.0072</td><td>0.011</td><td>0.018</td><td>0.037</td></tr>
 <tr><td>0.5 µs</td><td>0.0089</td><td>0.013</td><td>0.025</td><td>0.054</td><td>0.12</td></tr>
 <tr><td>0.9 µs</td><td>0.017</td><td>0.036</td><td>0.085</td><td>0.19</td><td>0.37</td></tr>
 <tr><td>1.7 µs</td><td>0.047</td><td>0.11</td><td>0.24</td><td>≥0.45</td><td>≥0.51</td></tr>
-<tr><td>3.3 µs（既定 = SDK 推奨）</td><td>0.135</td><td>≥0.33</td><td>≥0.50</td><td>≥0.51</td><td>≥0.52</td></tr>
+<tr><td>3.3 µs (default, SDK recommendation)</td><td>0.135</td><td>≥0.33</td><td>≥0.50</td><td>≥0.51</td><td>≥0.52</td></tr>
 </table>
 <ul>
-<li>CIC はほぼ縦方向の転送で決まり、速いほど・振幅が小さいほど少なくなります。既定（<code>vs_speed_index: -1</code> = SDK の推奨 index 4 = 3.3 µs）は最も遅いので、0.3 µs Normal にすると <b>約 1/22</b>（0.135 → 0.0061）です。0.0061 はカタログの spurious background（0.0018 イベント/画素、iXon Ultra）の約 3 倍まで近づきます。読み出し時間は 32.0 → 28.9 ms で、少し速くなります。</li>
-<li>水平方向（EM レジスタ）の速度では変わりません（3.3 µs で 10 / 5 / 3 MHz：0.142 / 0.145 / 0.145）。</li>
-<li>速い転送・小さい振幅では、大きな信号で電荷転送効率が下がることがあります（尾を引く）。0.3 µs Normal を常用する前に、明るい点像や飽和に近い光で尾を引かないことを確認してください。尾を引くなら振幅を +1〜+2 にします（それでも 3.3 µs Normal の 1/12〜1/7）。</li>
-<li>「≥」の値は、1 画素に複数の電子が入って計数が飽和しているため下限です（見かけの ADU/e⁻ も 20 → 59 に増えます）。</li>
+<li>CIC was dominated by vertical shifts and decreased with faster shifts and smaller amplitudes. The default <code>vs_speed_index: -1</code> selects SDK-recommended index 4, 3.3 µs, the slowest option. Switching to 0.3 µs Normal reduced CIC by <b>about 22 times</b>, 0.135 → 0.0061. This is about three times the iXon Ultra catalog spurious background of 0.0018 events/pixel. Readout also became slightly faster, 32.0 → 28.9 ms.</li>
+<li>Horizontal/EM-register speed made no appreciable difference: at 3.3 µs vertical shift, 10 / 5 / 3 MHz gave 0.142 / 0.145 / 0.145.</li>
+<li>Fast shifts with small amplitude can reduce charge-transfer efficiency for large signals, producing tails. Before routinely using 0.3 µs Normal, check bright point images or near-saturation illumination for trailing. If necessary, increase amplitude to +1 or +2; CIC remains about 1/12 to 1/7 of 3.3 µs Normal.</li>
+<li>Values marked “≥” are lower bounds because multiple electrons per pixel saturate the counting method. Apparent ADU/e⁻ also increases from about 20 to 59 in this regime.</li>
 </ul>
-<p><b>EM ゲインの設定と 1 電子あたりの ADU</b>（−85 °C、2 s、10 MHz ×1.0）：</p>
+<p><b>EM gain settings and ADU per electron</b> (−85 °C, 2 s, 10 MHz ×1.0):</p>
 <table>
-<tr><th>モード</th><th>設定 → ADU/e⁻</th></tr>
-<tr><td>DAC 0–255（mode 0）</td><td>50 → 6.9、60 → 12.8、67（−85 °C での上限。71 は 67 に制限）→ 20.4</td></tr>
-<tr><td>real gain（mode 3）</td><td>200 → 4.2、300 → 6.3。上限 300（500、1000 は 300 に制限）</td></tr>
+<tr><th>Mode</th><th>Setpoint → ADU/e⁻</th></tr>
+<tr><td>DAC 0–255 (mode 0)</td><td>50 → 6.9; 60 → 12.8; 67 → 20.4 (upper limit at −85 °C; 71 is limited to 67)</td></tr>
+<tr><td>Real gain (mode 3)</td><td>200 → 4.2; 300 → 6.3. Upper limit 300; 500 and 1000 are limited to 300.</td></tr>
 </table>
 <ul>
-<li>5 ADU/e⁻ 未満（DAC 40 以下、real gain 200 以下）では、1 電子の山が読み出しノイズ（1.6 ADU、しきい値 8 ADU）に埋もれて、この方法では測れません。</li>
-<li>DAC の上限は温度で変わります：常温 153、−20 °C 120、−40 °C 104、−60〜−80 °C 71、−85 °C 67。同じ DAC 設定でも冷やすほどゲインが高くなります（DAC 67〜71 で −60 °C 5.6、−70 °C 11、−85 °C 17.5 ADU/e⁻）。単一光子の計数では、DAC モードの上限付近のほうが real gain 300（約 6 ADU/e⁻）よりしきい値を超える割合が高くなります（63 % 対 約 25 %）。</li>
+<li>Below 5 ADU/e⁻ (DAC 40 or lower, real gain 200 or lower), single-electron signals are buried in read noise of 1.6 ADU with an 8 ADU threshold, so this method cannot measure them reliably.</li>
+<li>The DAC upper limit varies with temperature: 153 at room temperature, 120 at −20 °C, 104 at −40 °C, 71 from −60 to −80 °C, and 67 at −85 °C. At the same DAC setting, cooling increases gain: DAC 67–71 gave 5.6 ADU/e⁻ at −60 °C, 11 at −70 °C, and 17.5 at −85 °C. For single-photon counting, operating near the DAC limit gives a larger above-threshold fraction than real gain 300, approximately 6 ADU/e⁻: 63 % versus about 25 %.</li>
 </ul>
-<p><b>暗電流と温度</b>（EM DAC は各温度の上限、3.3 µs、露光 0.001 / 2 / 5 / 10 s。複数電子の画素を考えるポアソン補正 λ = −ln(1 − イベント率) / 検出率、e⁻/画素/s）：</p>
+<p><b>Dark current versus temperature</b>: EM DAC at each temperature's upper limit, 3.3 µs vertical shift, exposures 0.001 / 2 / 5 / 10 s. Multiple-electron occupancy was corrected using λ = −ln(1 − event fraction) / detection efficiency. Units: e⁻/pixel/s.</p>
 <table>
-<tr><th>温度</th><th>−85 °C</th><th>−70 °C</th><th>−60 °C</th><th>−40 °C</th><th>−20 °C</th></tr>
-<tr><td>暗電流</td><td>0.023</td><td>0.025</td><td>0.04（ゲインが低く誤差大）</td><td>約 0.1（0〜2 s）</td><td>≥0.3（2 s で既に飽和）</td></tr>
-<tr><td>CIC（切片）</td><td>0.13</td><td>0.13</td><td>0.15</td><td>0.15</td><td>0.19</td></tr>
+<tr><th>Temperature</th><th>−85 °C</th><th>−70 °C</th><th>−60 °C</th><th>−40 °C</th><th>−20 °C</th></tr>
+<tr><td>Dark current</td><td>0.023</td><td>0.025</td><td>0.04 (large uncertainty at low gain)</td><td>About 0.1 (0–2 s)</td><td>≥0.3 (already saturated at 2 s)</td></tr>
+<tr><td>CIC (intercept)</td><td>0.13</td><td>0.13</td><td>0.15</td><td>0.15</td><td>0.19</td></tr>
 </table>
 <ul>
-<li><b>−70 °C 以下では暗電流が温度によらず約 0.02 e⁻/画素/s で一定</b>になりました。熱による暗電流なら −85 °C で −70 °C の 1/4〜1/5 になるはずなので、この床は熱以外のものです。照明を消しても、シャッターを閉じても変わらなかった（9.2 節）ので、外からの光でもありません。候補は、露光中に撮像領域で生じる電荷（クロックのバイアス状態によるもの）、カメラ内部の発光、宇宙線・放射線（1 個で多くの画素に信号が出る）です。切り分けには、露光中のイベントの空間分布（塊か、一様か）を見るのが次の手です。</li>
-<li>−60 °C 以上では温度とともに増え、熱による暗電流が見えています。ただし床（0.02）を引いた増え方（−60 → −40 °C で約 4 倍）を常温まで延ばすと 10 e⁻/画素/s 程度にしかならず、常温の実測（310〜1000）より 1〜2 桁小さくなります。−40 °C の値も過小評価の可能性が高く（下記）、温度依存の傾きはこの測定からは決められません。</li>
-<li>−40、−20 °C では長い露光で計数が飽和し、さらにフレームごとの中央値をベースラインとする方法が偏るため、表の値は概算（−20 °C は下限）です。この温度での暗電流は、EM ゲインなしのレベルの傾き（<code>dark_noise.py</code>）で測るほうが適しています。</li>
+<li><b>Below −70 °C, measured dark current plateaued near 0.02 e⁻/pixel/s independent of temperature.</b> A thermal contribution should decrease by a factor of about 4–5 between −70 and −85 °C, suggesting a nonthermal floor. Turning off lights and closing the shutter did not change it (section 9.2), arguing against external light. Candidates include charge generated in the image area during exposure because of clock bias states, emission inside the camera, or cosmic rays/radiation producing signals in many pixels per event. Examining whether events form clusters or a uniform spatial distribution is the next diagnostic step.</li>
+<li>At −60 °C and warmer, the increase with temperature reveals a thermal contribution. However, extrapolating the roughly fourfold rise from −60 to −40 °C after subtracting the 0.02 floor predicts only about 10 e⁻/pixel/s at room temperature, one to two orders below the measured 310–1000. The −40 °C estimate is also likely low, as explained below, so these measurements do not establish the temperature dependence.</li>
+<li>At −40 and −20 °C, long exposures saturate event counting, and using each frame's median as the baseline introduces bias. These are approximate values, with −20 °C a lower bound. At these temperatures, measuring the level-versus-exposure slope without EM gain using <code>dark_noise.py</code> is more suitable.</li>
 </ul>
-<p><b>おすすめの設定</b>（暗い信号、EM ゲインあり）：−80〜−85 °C、EM 10 MHz ×1.0、縦方向 0.3 µs Normal（尾を引かないことを確認してから）、DAC モードの上限付近、暗画像は shutter closed。CIC が支配的な短い露光ほど、縦方向の速度の効果が大きくなります。</p>
+<p><b>Suggested settings from this survey</b> for faint signals with EM gain: −80 to −85 °C, EM 10 MHz ×1.0, vertical shift 0.3 µs Normal after checking for trailing, DAC mode near its upper limit, and shutter closed for dark frames. Vertical shift speed matters most for short exposures dominated by CIC.</p>
 
-<h2 id="release-deployment">GitHubリリースをWindowsへ配置</h2>
-<p>開発PCでPython 3、GitHub CLI（gh）、ssh、scpを用意し、必要なら <code>gh auth login</code> を実行します。SSHの接続名は通常の <code>~/.ssh/config</code> を使います。</p>
-<pre><code># 最新の公開リリースをmicro0とgen0へ配置
+<h2 id="release-deployment">Deploying GitHub releases to Windows</h2>
+<p>Install Python 3, GitHub CLI (gh), ssh, and scp on the development PC. Run <code>gh auth login</code> if needed. SSH host aliases use the usual <code>~/.ssh/config</code>.</p>
+<pre><code># Deploy the latest published release to micro0 and gen0
 python3 deploy/deploy_windows_release.py
-# 変更せずにリリース・ホスト名・配置先を確認
+# Check the release, hostnames, and destinations without making changes
 python3 deploy/deploy_windows_release.py --dry-run
-# 版別フォルダーへ配置（起動中の旧版を保持）
+# Use a versioned folder, preserving a running older version
 python3 deploy/deploy_windows_release.py --versioned
-# 特定のリリース・PCを指定
+# Select a release and a PC
 python3 deploy/deploy_windows_release.py --tag v0.2.1 micro0
-# 配置先ルートとSSH設定を指定
+# Specify the destination root and SSH configuration
 python3 deploy/deploy_windows_release.py --root 'D:\tools' --ssh-config ~/.ssh/config micro0 gen0</code></pre>
-<p>既定の配置先は <code>C:\local\andor_emccd_gui-windows-x64</code> です。<code>--versioned</code> ではフォルダー名にリリースタグが付きます。ZIPを1回ダウンロードし、各PCでSHA-256を照合、展開、実行ファイルの起動確認を行ってから配置します。既存フォルダーは日時付きでバックアップし、配置失敗時は復元します。同じリリースを配置済みで実行ファイルも一致する場合は変更しません。GUIの停止・起動やショートカット変更は行わず、対象フォルダーのGUIが起動中ならエラーにします。認証や配置に失敗したPCがあっても、残りのPCを処理して終了コード1を返します。GitHub Actionsのビルド成果物ではなく、公開リリースのZIPが対象です。</p>
-<h2 id="background-roi">背景ROIによる表示補正</h2>
-<p>AnalysisのROI表で1つのROIの <b>BG</b> をチェックし、<b>On</b> を有効にします。Displayの <b>Subtract background ROI</b> を有効にすると、そのROIの平均画素値を全画素から引いた画像を表示します。表示平均化の後、しきい値表示とカラーマップの前に処理し、負値も保持します。画像外のROIや無効なROIでは補正せず、その旨を表示します。</p>
-<p>ROI統計・式・UDPと保存される画素値は受信rawのままです。各フレームに背景ROI座標、平均・合計・画素数を <code>analysis.background</code> として付加します。TIFFのImageDescription、PNGのDescription、FITSのCOMMENTに格納し、NPYでは <code>.npy.json</code> を併記します。ストリーム保存の各TIFFページにもフレームごとのBG情報が入ります。画像サイズやビニングを変えた場合、ROI座標は新しい画像の画素座標で解釈されるので範囲を確認してください。ここでのrawはバックエンドから受信した画素値です。SDKのCount Convertを有効にした場合は、受信時点で既に整数の電子数／光子数へ換算されています。</p>
-<h2 id="windows">10. Windows でのビルド</h2>
-<p>Windows ではフロントエンド（GUI とテスト）だけをビルドします（<code>AEC_BUILD_BACKEND</code> は自動で OFF）。Windows PC（Windows 11、Visual Studio Build Tools 2026）で、以下の手順によるビルド、テスト 15 件の通過、LAN 越しのライブ表示、変更権の取得と解放、多重起動の防止を確認しました（2026-10-16）。管理者権限は不要で、ライブラリはすべて <code>%USERPROFILE%\Opt</code> に入れます。</p>
+<p>The default destination is <code>C:\local\andor_emccd_gui-windows-x64</code>. <code>--versioned</code> appends the release tag to the folder name. The script downloads the ZIP once, verifies SHA-256 on each PC, extracts it, and checks that the executable starts before installing. Existing folders receive timestamped backups and are restored if installation fails. An already installed release with a matching executable is left unchanged. The script does not stop/start the GUI or change shortcuts, and reports an error if the GUI is running from the destination folder. Authentication or deployment failure on one PC does not prevent processing the others; any failure produces exit code 1. It deploys published release ZIPs, not GitHub Actions build artifacts.</p>
+<h2 id="background-roi">Display correction using a background ROI</h2>
+<p>Check <b>BG</b> for one ROI in Analysis and enable its <b>On</b> checkbox. Enable <b>Subtract background ROI</b> in Display to subtract that ROI's mean from every displayed pixel. This is applied after display averaging and before thresholding or colormapping, preserving negative values. Invalid or out-of-image ROIs disable correction and show an explanation.</p>
+<p>ROI statistics, formulas, UDP output, and saved raw pixels remain based on the received data. Each frame receives background ROI coordinates, mean, sum, and pixel count in <code>analysis.background</code>, stored in TIFF ImageDescription, PNG Description, FITS COMMENT, or an NPY <code>.npy.json</code> sidecar. Every stream-recording TIFF page includes its own background metadata. After changing image size or binning, check the ROI bounds: coordinates are interpreted in pixels of the new image. Here, raw means pixels received from the backend. If SDK Count Convert is enabled, those received pixels have already been converted to integer electrons or photons.</p>
+<h2 id="windows">10. Building on Windows</h2>
+<p>Windows builds the frontend GUI and tests only; <code>AEC_BUILD_BACKEND</code> is automatically OFF. On the Windows PC (Windows 11, Visual Studio Build Tools 2026), the procedure below was verified with 15 passing tests, live display over the LAN, control acquisition/release, and duplicate-instance prevention (2026-10-16). Administrator privileges are unnecessary; all libraries are installed under <code>%USERPROFILE%\Opt</code>.</p>
 <ol>
-<li>Qt 6.8.3（MSVC 版）を aqtinstall で取得します（約 1.5 GB、30 秒程度）。
+<li>Install Qt 6.8.3 for MSVC with aqtinstall, approximately 1.5 GB and 30 seconds.
 <pre><code>python -m pip install aqtinstall
 python -m aqt install-qt windows desktop 6.8.3 win64_msvc2022_64 -O %USERPROFILE%\Opt\Qt</code></pre></li>
-<li>vcpkg を取得し、依存ライブラリをビルドします（数分）。
+<li>Fetch vcpkg and build dependencies, which takes a few minutes.
 <pre><code>git clone https://github.com/microsoft/vcpkg %USERPROFILE%\Opt\vcpkg
 %USERPROFILE%\Opt\vcpkg\bootstrap-vcpkg.bat -disableMetrics
 %USERPROFILE%\Opt\vcpkg\vcpkg install zeromq cppzmq tiff libpng cfitsio nlohmann-json gtest spdlog --triplet x64-windows --classic</code></pre></li>
-<li>ソースのフォルダで <code>tools\build_windows.bat</code> を実行します。VS の環境（vcvars64）の読み込み、CMake と Ninja によるビルド、テスト、<code>windeployqt</code> による DLL の収集までを行い、配布できる一式が <code>build-win\deploy</code> にできます。Opt の場所を変えるときは第 1 引数で、Qt の場所は環境変数 <code>QT_DIR</code> で指定します。
+<li>Run <code>tools\build_windows.bat</code> from the source folder. It loads the VS environment with vcvars64, builds with CMake and Ninja, runs tests, and collects DLLs using <code>windeployqt</code>. The distributable bundle is written to <code>build-win\deploy</code>. Override the Opt location with the first argument and the Qt location with <code>QT_DIR</code>.
 <pre><code>cd %USERPROFILE%\Development\AndorEMCCDcontroller
 tools\build_windows.bat
 build-win\deploy\andor_emccd_gui.exe --host camera-pc --name winpc</code></pre></li>
 </ol>
-<p class="note">vcvars64 は <code>VCPKG_ROOT</code> を VS 同梱の vcpkg に書き換えるため、スクリプトではその後で Opt の vcpkg を指定し直しています。手作業でビルドするときも注意してください。</p>
+<p class="note">vcvars64 replaces <code>VCPKG_ROOT</code> with the vcpkg bundled with VS. The script restores the Opt vcpkg path afterward; do the same for manual builds.</p>
 
-<h2 id="layout">11. ソース構成</h2>
-<pre><code>src/                       CMake（cppprojbuilder 形式）
-  core/                    ライブラリ
-    Protocol, CameraSettings      共有（JSON, 列挙名）
-    Camera, SimCamera, AndorCamera バックエンド: カメラ抽象、模擬カメラ、SDK2 実装
+<h2 id="layout">11. Source layout</h2>
+<pre><code>src/                       CMake (cppprojbuilder layout)
+  core/                    Libraries
+    Protocol, CameraSettings      Shared JSON and enumeration names
+    Camera, SimCamera, AndorCamera Backend camera interface, simulator, SDK2 implementation
     FrameStore, AcquisitionEngine, ControlServer
-    ThermalWatch, Telemetry       冷却の警報、Telegraf への送信
-    Analysis, Expression, Colormap, ImageIO, CameraClient   フロントエンド（Qt 非依存）
+    ThermalWatch, Telemetry       Cooling alarms and Telegraf output
+    Analysis, Expression, Colormap, ImageIO, CameraClient   Frontend, independent of Qt
   exec/andor_emccd_backend.cc
   exec/gui/                Qt6 GUI
   test/                    GoogleTest
-python/andor_emccd/        Python クライアント
-python/labscript_devices/  labscript デバイス
-python/bench/              ベンチマーク
-deploy/                    systemd（システム/ユーザー）, 設定例, udev, tmpfiles, インストーラ
-deploy/grafana/            Grafana ダッシュボード（冷却の監視）
-tools/                     build_windows.bat（Windows ビルド）, generate_colormaps.py, camera_pc/（カメラPCの準備）</code></pre>
+python/andor_emccd/        Python client
+python/labscript_devices/  labscript device
+python/bench/              Benchmarks
+deploy/                    System/user systemd units, example configuration, udev, tmpfiles, installers
+deploy/grafana/            Cooling-monitoring Grafana dashboards
+tools/                     build_windows.bat, generate_colormaps.py, camera_pc/ setup scripts</code></pre>
 
-<h2 id="stream-rings">12. リングバッファとクライアント別の欠落通知</h2>
-<p>サーバーは <code>backend.json</code> の <code>history_frames</code>（既定2000）と
-<code>history_megabytes</code>（既定2048）で履歴の長さを設定できます。
-フレーム数またはメモリ量の上限で古いフレームを上書きします。メモリ量0は容量制限なしで、
-1枚が上限より大きい場合も最新の1枚を保持します。</p>
-<p>GUIの接続画面の <code>Client buffer (frames)</code> または起動時の
-<code>--buffer-frames 64</code> でクライアントのリング長を指定します。既定は64枚です。
-受信と画像処理は別スレッドで動き、処理が遅くて満杯になった場合は最も古い未処理フレームを上書きします。
-GUIの dropped はサーバー側とクライアント側の欠落合計です。フレームレート欄のツールチップに直近の処理フレームの通知を表示します。</p>
+<h2 id="stream-rings">12. Ring buffers and per-client loss notifications</h2>
+<p>Configure server history with <code>history_frames</code> (default 2000) and
+<code>history_megabytes</code> (default 2048) in <code>backend.json</code>.
+Old frames are overwritten when either limit is reached. A memory limit of 0 means unlimited.
+The latest frame is retained even if it alone exceeds the limit.</p>
+<p>Set the GUI client's ring capacity using <code>Client buffer (frames)</code> in the connection dialog
+or <code>--buffer-frames 64</code> at startup; the default is 64 frames.
+Reception and image processing run on separate threads. If processing falls behind and the ring fills,
+the oldest unprocessed frame is overwritten. The GUI's dropped count combines server and client losses.
+The frame-rate tooltip shows notifications from the most recently processed frame.</p>
 <pre><code>from andor_emccd.client import FrameSubscriber
 sub = FrameSubscriber("camera-pc", buffer_frames=128)
 try:
@@ -517,164 +519,166 @@ try:
         print(header["delivery"]["client_loss"])
 finally:
     sub.close()</code></pre>
-<p>各フレームの <code>delivery</code> は <code>server_loss</code> と <code>client_loss</code> を含みます。
-<code>count</code> は前回の通知からの欠落数で、欠落なしでも必ず0を通知します。
-欠落時には <code>first_seq</code>、<code>last_seq</code>、<code>first_timestamp</code>、
-<code>last_timestamp</code> を付けます。時刻は欠落したフレームの取得時刻（Unix秒）、
-<code>reported_at</code> は通知を作った時刻です。連番はrunをまたぐサーバー全体の番号です。
-カメラSDKがサーバー取得前に失ったフレームは、この通知の対象外です。</p>
-<h3>プロトコルと送信位置</h3>
-<p>GUIとPythonのFrameSubscriberは制御ポートのROUTER/DEALERで受信します。
-<code>stream_open</code> が確立した時点の次のフレームから読み始め、接続前の履歴は
-<code>fetch</code> で取得します。各接続インスタンスの一意なclient IDを使い、送信位置を独立に保持します。
-古いPUB/SUB配信も互換性のため残しています。</p>
-<table><thead><tr><th>要求</th><th>動作</th></tr></thead><tbody>
-<tr><td><code>stream_open</code></td><td>送信位置を登録。同じIDでの再要求は位置をリセットしません。</td></tr>
-<tr><td><code>stream_read {count: 8, ack: 0}</code></td><td>最大count枚（1〜256）と、常に <code>loss</code>、<code>next_seq</code>、<code>batch_id</code> を返します。バイナリは既存fetchと同じ形式です。</td></tr>
-<tr><td><code>stream_read {count: 8, ack: batch_id}</code></td><td>直前の受信を確認して次のバッチへ進みます。確認されていないバッチは同じ内容を再送します。</td></tr>
-<tr><td><code>stream_close</code></td><td>送信位置と再送用バッチを解放します。</td></tr>
+<p>Each frame's <code>delivery</code> contains <code>server_loss</code> and <code>client_loss</code>.
+<code>count</code> is the loss since the previous notification and is explicitly 0 when no frames were lost.
+Loss notifications include <code>first_seq</code>, <code>last_seq</code>, <code>first_timestamp</code>, and
+<code>last_timestamp</code>. Timestamps are the lost frames' acquisition times in Unix seconds;
+<code>reported_at</code> is when the notification was created. Sequence numbers span all runs on the server.
+Frames lost inside the camera SDK before server acquisition are outside these notifications.</p>
+<h3>Protocol and delivery cursors</h3>
+<p>The GUI and Python FrameSubscriber receive frames through ROUTER/DEALER on the control port.
+Reading starts with the first frame after <code>stream_open</code> succeeds; use <code>fetch</code> for earlier history.
+Each connection instance has a unique client ID and an independent delivery cursor.
+Legacy PUB/SUB streaming remains available for compatibility.</p>
+<table><thead><tr><th>Request</th><th>Behavior</th></tr></thead><tbody>
+<tr><td><code>stream_open</code></td><td>Registers a delivery cursor. Repeating it with the same ID does not reset the cursor.</td></tr>
+<tr><td><code>stream_read {count: 8, ack: 0}</code></td><td>Returns up to count frames (1–256), always including <code>loss</code>, <code>next_seq</code>, and <code>batch_id</code>. Binary parts use the existing fetch format.</td></tr>
+<tr><td><code>stream_read {count: 8, ack: batch_id}</code></td><td>Acknowledges the previous batch and advances to the next. An unacknowledged batch is retransmitted unchanged.</td></tr>
+<tr><td><code>stream_close</code></td><td>Releases the delivery cursor and retransmission batch.</td></tr>
 </tbody></table>
-<p>遅いクライアントの未送信データがサーバーのリングから消える際、そのクライアントについて欠落を記録し、次の送信で通知します。
-高速なクライアントの通知には影響しません。欠落通知もバッチとともに保持され、再送で消えません。
-再送用に1クライアントあたり最大16 MiB（単一フレームがそれより大きい場合はその1枚）をリング外に共有保持します。
-登録上限は256、60秒間stream要求のない登録は失効します。受信エラーや失効は通知され、再接続時には新しいストリームを開きます。</p>
-<p>C++では <code>FrameSubscriber(context, data_endpoint, on_frame, on_status, capacity, control_endpoint)</code>
-を使用し、<code>Frame::delivery</code> で通知を受け取ります。control_endpointを省略した旧PUB受信では
-サーバーがクライアント別の時刻を追跡できないため、連番から検出した欠落の時刻はnullになります。
-Pythonの低水準APIは <code>open_stream()</code>、<code>read_stream()</code>、<code>close_stream()</code> です。
-同じストリームには読み手を1つにしてください。タイムアウトしたreadを再試行すると未確認のバッチを返します。</p>
-<p>試験用設定は <code>deploy/stream-test.json</code> にあります。
-ローカルとWindows PCのC++・Pythonで、独立カーソル、履歴上書きの正確な時刻、
-欠落0、受信リングの上書き、確認前バッチの再送を検証します。</p>
-<p>2026-10-18の結果：Linux C++ 25/25、Windows（MSVC）C++ 17/17が成功。
-Python統合試験は両環境で成功し、サーバー欠落2枚と取得時刻の一致、長さ2の受信リングでの欠落18枚、
-次回の欠落0、再送を確認しました。WindowsからはSSHの逆方向トンネルを利用しています。
-ローカルGUIでも模擬カメラのライブ画像を表示し、約49 fps・欠落0を確認しました。</p>
+<p>When unsent data for a slow client leaves the server ring, the server records that client's loss and reports it on the next delivery.
+Other, faster clients are unaffected. Loss notifications remain attached to retained batches and survive retransmission.
+Each client can retain up to 16 MiB of shared frame references outside the ring for retransmission, or one frame if larger.
+There are at most 256 registrations; a registration expires after 60 seconds without a stream request.
+Receive errors and expiry are reported, and reconnection opens a new stream.</p>
+<p>In C++, use <code>FrameSubscriber(context, data_endpoint, on_frame, on_status, capacity, control_endpoint)</code>
+and read notifications from <code>Frame::delivery</code>. Legacy PUB reception without control_endpoint detects sequence gaps,
+but loss timestamps are null because the server cannot track each client's delivery history.
+Python's low-level API provides <code>open_stream()</code>, <code>read_stream()</code>, and <code>close_stream()</code>.
+Use one reader per stream. Retrying a timed-out read returns the unacknowledged batch.</p>
+<p>Test configuration is in <code>deploy/stream-test.json</code>.
+C++ and Python tests on Linux and Windows cover independent cursors, exact timestamps for overwritten history,
+zero-loss reports, receiver-ring overwrites, and retransmission of unacknowledged batches.</p>
+<p>Results on 2026-10-18: Linux C++ 25/25 and Windows MSVC C++ 17/17 passed.
+Python integration tests passed on both platforms, verifying two lost server frames and their timestamps,
+18 lost frames in a receiver ring of capacity two, a subsequent zero-loss report, and retransmission.
+Windows used an SSH reverse tunnel. The local GUI also displayed the simulator at about 49 fps with zero losses.</p>
 
-<h2 id="display-average">13. クライアントでの画像の平均表示</h2>
-<p>Displayパネルの <strong>Average (frames)</strong> に、表示に使う直近の画像枚数を指定します。
-受信した画像をクライアントのリングに保持し、画素ごとの移動平均を表示します。1は平均なしです。
-平均枚数は1〜リング長−1に制限されます。リング長1の場合は平均なしだけを選べます。
-リング長を小さくして再接続した場合も、平均枚数は新しい上限に収まります。</p>
-<p><strong>Images averaged</strong> は「実際に使った枚数 / 設定枚数」です。接続・撮影開始直後など、
-画像がまだ十分にない場合は保持している枚数で平均します。画像のrun、サイズ、画素型、ビニング、
-センサー上の位置が変わった場合は履歴をリセットし、異なる撮影条件の画像を混ぜません。
-欠落がある場合はリングに実際に残っている画像を使います。平均枚数を変えると、停止中でも保持画像から再描画します。</p>
-<p>平均は表示画像とカーソルで読み取る画素値に適用し、整数画像の端数も表示できるよう平均結果をfloat32で扱います。
-ROI解析・UDP出力・フレームの記録・Save frameは元のフレームを使います。
-Save viewは平均後の画面画像を保存します。サーバーの設定変更や制御権の取得は不要です。
-平均枚数はクライアントの設定に保存されます。</p>
-<p>数値平均、端数、履歴の上書き、枚数制約、run・画像位置の変更をC++テストで確認し、
-模擬カメラのGUIでもリング長4・平均枚数3のライブ表示と設定保存を確認しました。
-最終試験はLinux 28/28、Windows（MSVC）20/20が成功し、Windows版も更新済みです。</p>
-<h2 id="stream-recording">14. ライブ画像の逐次保存</h2>
-<p>右側の <strong>Stream recording</strong> タブで、新しい保存先の <code>.tif</code> ファイルと
-<strong>Maximum save rate (fps)</strong> を指定し、<strong>Start saving</strong> を押します。
-0は受信した全フレーム、正の値はそのfps以下になるよう取得時刻を基準に間引きます。
-最大fpsは撮影runごとに適用し、取得間隔の比較には1 µsの許容差を設けています。
-Stop saving・切断・終了時は、書き込み待ちの画像を保存してファイルを閉じます。
-設定は保存しますが、次回の起動時に自動で保存を再開することはありません。</p>
-<p>形式は<strong>非圧縮の複数ページBigTIFF</strong>です。1ファイルに複数の生画像を逐次追記し、4 GiBを超える記録にも対応します。
-表示の平均設定によらずuint16・int32・float32の元データを保存します。各ページのJSONには連番、run、
-取得時刻、画像サイズ、画素型、露光・ゲインなどのフレームヘッダーと欠落通知を格納し、最初のページには開始時の設定も格納します。
-撮影途中で画像サイズが変わってもページ単位で読み出せます。
-<a href="https://github.com/cgohlke/tifffile">tifffile公式説明</a>、
-<a href="https://libtiff.gitlab.io/libtiff/functions/TIFFOpen.html">libtiffの形式指定</a>を参照してください。</p>
-<p>保存は専用スレッドで行い、画面には保存済み・fpsによる間引き・保存キューあふれ・待ち枚数・失敗を表示します。
-キューの上限はクライアントのリング長と256 MiBで、これに書き込み中の最大1枚が加わります。
-既存ファイルは上書きしません。保存fpsは上限なので、撮影速度やディスク速度が不足すれば実際の保存fpsは低くなります。
-各ページは完成後にOSへ書き出しますが、停電耐性や保存途中の同時読取を保証するものではありません。</p>
-<pre><code># Pythonの読み出し用に一度だけ: pip install tifffile
+<h2 id="display-average">13. Client-side display averaging</h2>
+<p>Set <strong>Average (frames)</strong> in Display to the number of recent frames to average.
+Received images are retained in the client ring and displayed as a per-pixel moving average; 1 disables averaging.
+The allowed range is 1 to ring capacity minus 1. A ring capacity of 1 permits only no averaging.
+Reconnecting with a smaller ring also clamps the averaging count to the new limit.</p>
+<p><strong>Images averaged</strong> shows the actual count used / requested count. Immediately after connecting or starting acquisition,
+fewer frames may be available, so the average uses those retained. History resets when the run, image dimensions,
+pixel type, binning, or sensor position changes, preventing incompatible images from being mixed.
+After losses, averaging uses the frames actually retained. Changing the count redraws retained frames even while acquisition is stopped.</p>
+<p>Averaging affects the displayed image and cursor pixel values. Results use float32 to preserve fractions from integer images.
+ROI analysis, UDP output, frame recording, and Save frame use the original frames.
+Save view exports the averaged display. No server setting changes or control ownership are required.
+The averaging count is saved in client preferences.</p>
+<p>C++ tests cover numerical averages, fractions, overwritten history, count limits, and changes in run or image position.
+Simulator GUI tests verified live display and persistence with a ring capacity of 4 and averaging count 3.
+At this feature's validation, Linux 28/28 and Windows MSVC 20/20 tests passed, and the Windows installation was updated.</p>
+<h2 id="stream-recording">14. Stream recording</h2>
+<p>In the right-hand <strong>Stream recording</strong> tab, choose a new <code>.tif</code> destination,
+set <strong>Maximum save rate (fps)</strong>, and press <strong>Start saving</strong>.
+A value of 0 saves every received frame. Positive values subsample by acquisition timestamp to stay at or below the limit.
+The limit is applied separately for each run, with a 1 µs tolerance when comparing intervals.
+Stop saving, disconnecting, or exiting drains queued images and closes the file.
+Settings persist, but recording does not automatically resume on the next launch.</p>
+<p>The format is <strong>uncompressed multipage BigTIFF</strong>. Raw frames are appended to one file, including recordings above 4 GiB.
+Original uint16, int32, or float32 pixels are saved regardless of display averaging.
+Each page's JSON contains sequence/run identifiers, acquisition time, dimensions, pixel type, exposure, gain,
+other frame-header fields, and loss notifications. The first page also includes the initial settings.
+Pages remain individually readable if image dimensions change during recording.
+See the <a href="https://github.com/cgohlke/tifffile">tifffile documentation</a> and
+<a href="https://libtiff.gitlab.io/libtiff/functions/TIFFOpen.html">libtiff format options</a>.</p>
+<p>A dedicated thread writes images. The UI reports saved frames, rate-skipped frames, queue drops, pending frames, and failures.
+The queue is bounded by both client ring capacity and 256 MiB, plus at most one frame being written.
+Existing files are never overwritten. The fps setting is an upper limit; acquisition or disk throughput can reduce the actual rate.
+Each completed page is flushed to the OS, but power-loss resilience and concurrent reads during recording are not guaranteed.</p>
+<pre><code># Install once for Python reading: pip install tifffile
 from andor_emccd.recording import iter_recorded_frames
 for image, info in iter_recorded_frames("recording.tif"):
     print(info["frame"]["seq"], info["frame"]["timestamp"])
     print(image.shape, image.dtype)
-    # 初期設定は最初のページの info["metadata"]
+    # Initial settings are in info["metadata"] on the first page
     print(info["recording"]["loss_since_previous_saved"])</code></pre>
-<p>読み出しはページ単位なので、記録全体をメモリへ読み込む必要はありません。
-<code>rate_skipped_total</code> と <code>queue_dropped_total</code> は各ページを保存候補に選んだ時点の累積値です。
-最後の保存ページより後の間引きはファイル内の値には含まれず、停止後の画面で最終値を確認できます。
-fpsで間引いた画像に付いていた受信欠落通知も、次に保存するページへまとめて引き継ぎます。</p>
-<p>画像と多数の解析配列を階層構造でまとめたい場合は、拡張可能なデータセットを持つ
-<a href="https://support.hdfgroup.org/documentation/hdf5/latest/_l_b_ext_dset.html">HDF5</a>も有力です。
-今回はWindowsを含む既存ライブラリで利用でき、Pythonから画像を簡単に扱えるBigTIFFを採用しました。
-Linuxで34件、Windows（MSVC）で26件のテストが通過しました。
-GUIでは表示を3枚平均にしたまま5 fps以下で13枚の生uint16画像を保存し、Pythonで読み戻しました。
-Windowsで書いたファイルもLinuxのPythonから読み戻せることを確認済みです。</p>
+<p>Reading is page-by-page and does not require loading the entire recording into memory.
+<code>rate_skipped_total</code> and <code>queue_dropped_total</code> are cumulative values when each page was selected for saving.
+Skips after the last saved page are not reflected in the file; final totals remain visible in the UI after stopping.
+Receive-loss notifications attached to rate-skipped frames are accumulated into the next saved page.</p>
+<p>For hierarchical storage of images with many analysis arrays,
+<a href="https://support.hdfgroup.org/documentation/hdf5/latest/_l_b_ext_dset.html">HDF5 with extendible datasets</a> is another option.
+BigTIFF was chosen here because existing dependencies support it on Windows and it is convenient for Python image processing.
+Validation passed 34 Linux and 26 Windows MSVC tests. With display averaging set to three frames,
+the GUI recorded 13 raw uint16 frames at no more than 5 fps, which were read back in Python.
+Files written on Windows were also read successfully by Python on Linux.</p>
 
-<h2 id="thermal">15. 冷却の監視と記録（Telegraf / Grafana）</h2>
-<h3>15.1 センサー温度だけでは足りない理由</h3>
-<p>status の <code>temperature_c</code>（GUI の Status に出る温度）は <code>GetTemperatureF</code> による <b>CCD センサーの温度</b>で、ヒートシンクの温度ではありません。iXon3 のハードウェアガイド 1.3.7「Overheating」によると、ヒートシンクにはサーマルスイッチがあり、規定の温度を超えると <b>TE クーラーの電源を切ってブザーを鳴らします</b>。ヘッドが冷えると自動で復帰します。スイッチの動作回数には限りがあるので、遮断を繰り返す条件で使ってはいけません。原因は、通気口がふさがれている、水冷の流量が足りない・止まっている、室温が 30 °C を超えている、などです。</p>
-<p>このスイッチは SDK から読めません（SDK 2.103 の <code>libandor.so</code> を逆アセンブルして確認、2026-10-23）。</p>
+<h2 id="thermal">15. Cooling monitoring and telemetry (Telegraf / Grafana)</h2>
+<h3>15.1 Why sensor temperature alone is insufficient</h3>
+<p>Status's <code>temperature_c</code>, shown in the GUI, comes from <code>GetTemperatureF</code> and is the <b>CCD sensor temperature</b>, not the heat-sink temperature. The iXon3 hardware guide, section 1.3.7 “Overheating”, describes a thermal switch on the heat sink that <b>cuts TE cooler power and sounds a buzzer</b> above its threshold. Cooling resumes automatically when the head cools. The switch has a limited operating-cycle lifetime, so avoid conditions that repeatedly trip it. Causes include blocked vents, inadequate or stopped water flow, and room temperature above 30 °C.</p>
+<p>This switch cannot be read through the SDK, based on inspection of disassembled SDK 2.103 <code>libandor.so</code> on 2026-10-23.</p>
 <ul>
-<li><code>GetTECStatus</code>（「TEC が過熱したか」）と <code>GetFrontEndStatus</code> は iVac 専用で、iXon には <code>DRV_NOT_SUPPORTED</code> を返します。</li>
-<li>SDK 内部の過熱トリップの読み出し（<code>Micro::TempTripState</code>）は iVac / iVac CCD / iKon-XL だけです。過熱フラグのレジスタ（<code>OverTempFlag</code>、<code>HeatSinkSensor</code>）は USB カメラの処理でしか使われていません。</li>
+<li><code>GetTECStatus</code>, which reports TEC overheating, and <code>GetFrontEndStatus</code> are iVac-only and return <code>DRV_NOT_SUPPORTED</code> on iXon.</li>
+<li>The internal overtemperature-trip reader, <code>Micro::TempTripState</code>, applies only to iVac, iVac CCD, and iKon-XL. The <code>OverTempFlag</code> and <code>HeatSinkSensor</code> registers appear only in USB-camera code paths.</li>
 </ul>
-<p>そのため遮断の直後もセンサー温度はしばらく正常に見え、センサーが温まり始めてから初めて分かります。そこで次の 2 つで監視します。</p>
+<p>The sensor can therefore appear normal briefly after a trip; loss of cooling becomes visible only after it warms. Monitoring uses two complementary checks:</p>
 <ol>
-<li><b>ヘッドの温度と TE クーラーの電圧</b>：<code>GetTemperatureStatus</code>（マニュアルでは「RESERVED」）は、iXon の 8 ビット冷却制御では、ヘッドの冷却制御回路の ambient 温度（I2C レジスタ <code>TemperatureDACAmbient</code>、LM60 相当の換算）と TE クーラーの電圧（<code>TemperatureDACCoolerVoltage</code>、0.03 V/LSB）を I2C で読みます（読み出しだけで、書き込みはしません）。起動時に 1 回試し、値が得られれば 2 秒ごとに読みます（取得中は、温度を取得中に読める機種だけ）。結果はログの <code>thermal readouts:</code> 行と、<code>get_info</code> の <code>has_ambient_temperature</code>、<code>has_cooler_voltage</code>、<code>thermal_probe</code> に出ます。値が得られない機種では <code>null</code> になります。</li>
-<li><b>冷却喪失の警報</b>（<code>ThermalWatch</code>）：クーラーがオンで、センサーが一度設定温度に達した（設定温度 +3 °C 以下になった）後に、設定温度 + <code>cooling_lost_margin_c</code>（既定 5 °C）を超えたら <code>alarm</code>。SDK が <code>drift</code>（安定後に外れた）を返すか、センサー温度が読めないときは <code>warning</code>。設定温度を変えたときとクーラーをオフにしたときは、再び到達するまで判定しません。状態が変わるたびに 1 回だけログに出します（<code>[error] thermal alarm: cooling lost: ...</code>、<code>[warning] thermal warning: ...</code>、<code>[info] thermal state normal again</code>）。</li>
+<li><b>Head temperature and TE cooler voltage</b>: for iXon's 8-bit cooling controller, <code>GetTemperatureStatus</code>, marked “RESERVED” in the manual, reads the cooling-control circuit's ambient temperature over I2C from <code>TemperatureDACAmbient</code> using an LM60-equivalent conversion, and TE cooler voltage from <code>TemperatureDACCoolerVoltage</code> at 0.03 V/LSB. These are read-only operations. The backend probes once at startup and, if supported, reads every 2 seconds. During acquisition it does so only on cameras supporting temperature reads while acquiring. Results appear in the <code>thermal readouts:</code> log and <code>get_info</code> fields <code>has_ambient_temperature</code>, <code>has_cooler_voltage</code>, and <code>thermal_probe</code>. Unsupported readings are <code>null</code>.</li>
+<li><b>Loss-of-cooling alarm</b> (<code>ThermalWatch</code>): once an enabled cooler has brought the sensor within 3 °C of the target, temperature above target + <code>cooling_lost_margin_c</code> (default 5 °C) raises <code>alarm</code>. SDK <code>drift</code> status or an unreadable sensor temperature produces <code>warning</code>. Changing the target or disabling cooling resets target attainment; loss-of-cooling evaluation waits for the target to be reached again. Each state transition logs once: <code>[error] thermal alarm: cooling lost: ...</code>, <code>[warning] thermal warning: ...</code>, or <code>[info] thermal state normal again</code>.</li>
 </ol>
-<p>status に加えた項目：<code>target_temperature_c</code>、<code>fan_mode</code>、<code>ambient_temperature_c</code>、<code>cooler_voltage_v</code>、<code>tec_overheat</code>（読めないものは <code>null</code>）、<code>thermal_alarm</code>（<code>ok</code> / <code>warning</code> / <code>alarm</code>）、<code>thermal_alarm_reason</code>、<code>thermal_alarm_count</code>（起動後に <code>alarm</code> になった回数）。自動で冷却を止めるなどの操作はしません。</p>
+<p>Additional status fields are <code>target_temperature_c</code>, <code>fan_mode</code>, <code>ambient_temperature_c</code>, <code>cooler_voltage_v</code>, <code>tec_overheat</code> (unavailable values are <code>null</code>), <code>thermal_alarm</code> (<code>ok</code> / <code>warning</code> / <code>alarm</code>), <code>thermal_alarm_reason</code>, and <code>thermal_alarm_count</code>, counting entries into alarm since startup. Monitoring does not automatically stop cooling or otherwise change camera state.</p>
 
-<h3>15.2 Telegraf への送信</h3>
+<h3>15.2 Sending telemetry to Telegraf</h3>
 <pre><code>"cooling_lost_margin_c": 5,
 "telemetry": {
-  "url": "http://192.168.1.5:8080/telegraf",   // "" で送らない（deploy/backend.json の既定）
+  "url": "http://192.168.1.5:8080/telegraf",   // "" disables sending (default in deploy/backend.json)
   "interval_s": 5,
   "timeout_s": 3,
   "measurement": "andor_emccd",
   "tags": {"tlg_bucket": "laserlab", "site": "laserlab", "device": "emccd",
            "model": "DU897_BV", "serial": "6598"}
 }</code></pre>
-<p>InfluxDB line protocol を HTTP POST します（Telegraf の <code>http_listener_v2</code>、<code>/opt/labtime</code> の時刻監視と同じ形式）。<code>host</code> タグ（ホスト名）は自動で付き、タイムスタンプ（ns）は status を読んだ時刻です。送信は専用スレッドで行い、カメラのスレッドを待たせません。届かない間は最大 4320 点（5 秒間隔で 6 時間）を保持し、次の送信でまとめて送ります。失敗は最初と、続く場合は 10 分ごとにログに出ます。<code>--no-telemetry</code> で一時的に止められます。</p>
-<p>VictoriaMetrics では <code>andor_emccd_&lt;field&gt;{db="laserlab", host="LaserLabLinux1", device="emccd", ...}</code> になります（Telegraf が <code>tlg_bucket</code> を <code>db</code> ラベルにします）。カメラが <code>disconnected</code> の間は <code>state</code> だけを送り、読めない値は古い値を送らずに省きます。</p>
+<p>Telemetry sends InfluxDB line protocol by HTTP POST to Telegraf's <code>http_listener_v2</code>, using the same format as the <code>/opt/labtime</code> time monitor. A <code>host</code> tag is added automatically; nanosecond timestamps reflect when status was sampled. Sending runs on a dedicated thread and never blocks the camera thread. During outages, up to 4320 points are retained, equivalent to 6 hours at 5-second intervals, and sent together on the next successful attempt. Failures are logged initially and every 10 minutes while continuing. <code>--no-telemetry</code> temporarily disables sending.</p>
+<p>In VictoriaMetrics, series are named <code>andor_emccd_&lt;field&gt;{db="laserlab", host="LaserLabLinux1", device="emccd", ...}</code>; Telegraf maps <code>tlg_bucket</code> to the <code>db</code> label. When the camera is <code>disconnected</code>, only <code>state</code> is sent. Unavailable values are omitted rather than replaced with stale readings.</p>
 <div class="table-wrap"><table>
-<tr><th>field</th><th>型</th><th>内容</th></tr>
-<tr><td>sensor_temperature_c</td><td>float</td><td>CCD センサー温度（読めないときは送らない）</td></tr>
-<tr><td>temperature_status</td><td>int</td><td>0 off, 1 not_reached, 2 not_stabilized, 3 stabilized, 4 drift, 5 unknown（読めない）</td></tr>
-<tr><td>target_temperature_c</td><td>int</td><td>設定温度</td></tr>
-<tr><td>cooler_on</td><td>int</td><td>0 / 1（SDK の <code>IsCoolerOn</code>。サーマルスイッチの遮断では変わらない）</td></tr>
+<tr><th>Field</th><th>Type</th><th>Meaning</th></tr>
+<tr><td>sensor_temperature_c</td><td>float</td><td>CCD sensor temperature; omitted when unreadable</td></tr>
+<tr><td>temperature_status</td><td>int</td><td>0 off, 1 not_reached, 2 not_stabilized, 3 stabilized, 4 drift, 5 unknown/unreadable</td></tr>
+<tr><td>target_temperature_c</td><td>int</td><td>Temperature setpoint</td></tr>
+<tr><td>cooler_on</td><td>int</td><td>0 / 1 from SDK <code>IsCoolerOn</code>; does not change when the thermal switch trips</td></tr>
 <tr><td>fan_mode</td><td>int</td><td>0 full, 1 low, 2 off</td></tr>
-<tr><td>ambient_temperature_c</td><td>float</td><td>ヘッドの冷却制御回路の温度（<code>GetTemperatureStatus</code> の AmbientTemp。得られる機種だけ）</td></tr>
-<tr><td>cooler_voltage_v</td><td>float</td><td>TE クーラーの電圧（同 CoolerVolts。得られる機種だけ。冷却中は約 7.3 V で、負荷で少し下がる電源電圧のような値。15.4 節）</td></tr>
-<tr><td>tec_overheat</td><td>int</td><td><code>GetTECStatus</code>（対応する機種だけ。iXon では送らない）</td></tr>
+<tr><td>ambient_temperature_c</td><td>float</td><td>Head cooling-control circuit temperature, from GetTemperatureStatus's AmbientTemp, where supported</td></tr>
+<tr><td>cooler_voltage_v</td><td>float</td><td>TE cooler voltage, from CoolerVolts, where supported. About 7.3 V during cooling, behaving like a supply voltage that drops slightly under load; see section 15.4.</td></tr>
+<tr><td>tec_overheat</td><td>int</td><td><code>GetTECStatus</code> where supported; omitted on iXon</td></tr>
 <tr><td>thermal_alarm</td><td>int</td><td>0 ok, 1 warning, 2 alarm</td></tr>
-<tr><td>thermal_alarm_count</td><td>int</td><td>起動後に alarm になった回数（0.5 秒ごとに判定するので、5 秒の間の短い alarm も数える）</td></tr>
-<tr><td>em_gain</td><td>int</td><td>実際に掛かっている EM ゲイン</td></tr>
-<tr><td>fps</td><td>float</td><td>取得のフレームレート</td></tr>
+<tr><td>thermal_alarm_count</td><td>int</td><td>Alarm entries since startup. Evaluation every 0.5 seconds counts brief alarms between 5-second telemetry samples.</td></tr>
+<tr><td>em_gain</td><td>int</td><td>Applied EM gain</td></tr>
+<tr><td>fps</td><td>float</td><td>Acquisition frame rate</td></tr>
 <tr><td>state</td><td>int</td><td>0 idle, 1 acquiring, 2 error, 3 disconnected</td></tr>
 </table></div>
 
-<h3>15.3 Grafana ダッシュボード</h3>
-<p><code>deploy/grafana/andor-emccd-dashboard.json</code> を Grafana（<code>http://192.168.1.5:3000</code>）の Dashboards → New → Import → Upload dashboard JSON file で読み込み、上部の Data source で VictoriaMetrics（Prometheus 型）を選びます。uid が固定（<code>andor-emccd-cooling</code>）なので、更新版は同じ手順で上書きできます。警報（thermal alarm）、センサー − 設定温度、TE クーラーの電圧、ヘッドの温度、最後の受信からの秒数、時間範囲内の最悪レベルと alarm 回数、各値の推移と状態の時系列を表示します。ヘッド温度の色のしきい値（45 / 50 °C）は仮の値なので、記録がたまってから調整してください。</p>
+<h3>15.3 Grafana dashboard</h3>
+<p>Import <code>deploy/grafana/andor-emccd-dashboard.json</code> in Grafana at <code>http://192.168.1.5:3000</code> using Dashboards → New → Import → Upload dashboard JSON file, then select the VictoriaMetrics Prometheus-type data source. The fixed UID <code>andor-emccd-cooling</code> allows later imports to update the same dashboard. Panels show thermal alarms, sensor-minus-target temperature, TE cooler voltage, head temperature, time since the last sample, worst severity and alarm count over the selected range, trends, and state timelines. Head-temperature color thresholds of 45 / 50 °C are provisional; adjust them after collecting operating history.</p>
 
-<h3>15.4 確認</h3>
-<p>模擬カメラ（<code>AEC_SIM_TRIP_AT_S=45</code> で起動 45 秒後から 60 秒間スイッチが切れる模擬）と手元の HTTP サーバーで、150 秒間に 150 点が届くこと、遮断で電圧が 0 V になりヘッド温度が上がること、センサーが設定温度 +5 °C を超えた時点で 1 回だけ <code>thermal alarm: cooling lost</code> が出て復帰時に <code>normal again</code> が出ることを確認しました（2026-10-23）。単体試験は <code>test_telemetry</code>（警報の判定、line protocol のエスケープ、URL、HTTP の送信とエラー、送れない間の保持、エンジンからの送信）です。</p>
-<p><b>実機（2026-10-23、水冷あり、設定 -80 °C）</b>：起動時のログは <code>thermal readouts: GetTemperatureStatus: sensor -79.25 C, target -79.90 C, ambient 37.45 C, cooler 7.32 V; GetTECStatus: DRV_NOT_SUPPORTED</code>。センサーの値は <code>GetTemperatureF</code>（-79.247 °C）と一致し、換算が正しいことを確認しました。値は 8 ビットで、センサー 0.65 °C、ヘッド 1.58 °C、電圧 0.03 V 刻みです。Telegraf 経由で VictoriaMetrics に 12 系列が約 5 秒ごとに入ります。再起動の直後はセンサーが 2 分ほど ±2 °C 動き（-79.9 → -77.9 °C、<code>not_stabilized</code>）、その後 -79.25 °C で <code>stabilized</code> に戻りました。ヘッドは 37〜39 °C です。</p>
-<p>設定温度を -80 → -75 °C に変えたところ（18:25）、ヘッドの温度は 1 分以内に約 42 → 39 °C に下がりましたが、<code>cooler_voltage_v</code> は 7.29 → 7.35 V とむしろ少し上がり、変更の直後だけ 7.53 V になりました。この値は駆動の割合ではなく、負荷で少し下がる TE クーラーの電源電圧のように振る舞います（レジスタの最大 7.65 V に近いことを「全力で冷やしている」と読むのは誤りでした）。負荷の目安にはヘッドの温度が向いています。再起動の後、-80 °C ではヘッドが 20 分ほどかけて 37 → 42 °C に上がりました（再起動でヘッドの回路に電源が入り直したためと考えられます）。遮断のときにこの電圧が 0 V に落ちるのか、無負荷の約 7.5 V に上がるのかは、次に起きたときの記録で確かめてください。</p>
+<h3>15.4 Verification</h3>
+<p>A simulator configured with <code>AEC_SIM_TRIP_AT_S=45</code> trips its switch 45 seconds after startup for 60 seconds. With a local HTTP receiver, testing on 2026-10-23 verified 150 points over 150 seconds, voltage dropping to 0 V and head temperature rising during the trip, exactly one <code>thermal alarm: cooling lost</code> entry when the sensor crossed target +5 °C, and <code>normal again</code> on recovery. <code>test_telemetry</code> covers alarm decisions, line-protocol escaping, URLs, HTTP success/errors, outage buffering, and engine telemetry.</p>
+<p><b>Real camera, 2026-10-23, water cooling, −80 °C target:</b> startup logged <code>thermal readouts: GetTemperatureStatus: sensor -79.25 C, target -79.90 C, ambient 37.45 C, cooler 7.32 V; GetTECStatus: DRV_NOT_SUPPORTED</code>. The sensor reading matched <code>GetTemperatureF</code> at -79.247 °C, validating the conversion. Readings are 8-bit, with steps of 0.65 °C for the sensor, 1.58 °C for the head, and 0.03 V for voltage. Twelve series reached VictoriaMetrics through Telegraf approximately every 5 seconds. Immediately after restart, the sensor varied by about ±2 °C for two minutes (-79.9 → -77.9 °C, <code>not_stabilized</code>), then returned to <code>stabilized</code> at -79.25 °C. The head was at 37–39 °C.</p>
+<p>Changing the target from -80 to -75 °C at 18:25 lowered head temperature from about 42 to 39 °C within a minute, while <code>cooler_voltage_v</code> rose slightly from 7.29 to 7.35 V, briefly reaching 7.53 V immediately after the change. This behaves like the TE cooler supply voltage with a slight load-dependent drop, rather than a cooling duty fraction. Interpreting a value near the register maximum of 7.65 V as maximum cooling effort was incorrect. Head temperature is a better load indicator. After a restart at -80 °C, the head warmed from 37 to 42 °C over about 20 minutes, possibly because its circuitry had been power-cycled. A future trip must establish whether this voltage drops to 0 V or rises to an unloaded level near 7.5 V.</p>
 
-<h2 id="display-conversion">16. 小数の電子数・光子数表示と設定記録（v0.3.0）</h2>
-<p><strong>Display conversion</strong> タブの Display units で Counts / Electrons / Photons を選びます。
-Camera calibration は SDK の GetSensitivity と GetQE を使います。RealGain は設定倍率、EM off は公称1倍を使い、
-実測済みの倍率とは区別して記録します。DAC・Linearモードで実倍率が不明な場合やSDKが値を返さない場合は、
-Manual coefficients に切り替え、Sensitivity (e⁻/ADU)、Physical EM gain、QE (%)、Baseline (ADU) を入力してください。
-Camera calibration から Manual に切り替えると直前の表示値を編集できます。</p>
-<p>換算式は <code>electrons = (raw − offset) × sensitivity / EM gain</code>、
-<code>photons = electrons / QE</code>（QEは0〜1）です。BG ROIを使う場合は、そのフレームのROI平均値がoffsetになり、
-baselineを二重には引きません。カメラ側の <strong>SDK conversion (integer)</strong> は Counts に設定してください。
-表示換算はfloat32で小数・負値を保ちます。通常のSave frame / Record / Stream recordingは元データを保存し、
-<strong>Save converted</strong> は平均・BG補正・単位換算後、カラーマップやしきい値の適用前の値をfloat32 TIFF/FITS/NPYに保存します。
-ROI統計・式・UDP出力は従来どおりraw単位です。保存係数だけでは真の整数光子数の確定はできず、換算値は推定値です。</p>
-<p>raw TIFF各ページの <code>analysis</code> にはBG ROIの座標・平均・画素数と、GUI設定・使用係数・換算式を記録します。
-FITS/PNGのJSONタグ、NPYの <code>.npy.json</code> にもメタデータを保存します。過去のバックエンド画像を後から保存した場合は、
-GUI設定が保存時のスナップショットであることを明記します。新版バックエンドの各フレームヘッダーには取得時のカメラ設定も入ります。</p>
-<p>接続した各GUIは表示・校正・ROI・式・UDP・トレンド・ウィンドウ配置などをバックエンドへ通知します。
-BLACSはbuffered移行時のスナップショットを、<code>data/&lt;device&gt;/camera/images/gui_settings_snapshot</code> にJSONとして保存します。
-micro0とgen0のGUIは別プロファイルとして、送信元・更新時刻とともに記録します。カメラ由来の係数はそのショットの実際の設定で再取得し、
-各フレームのBG平均と換算情報を <code>frame_display_metadata</code> に保存します。raw画像はCountsで保存し、PNG/HDF5プレビューも生成します。
-これはコンパイル時ではなく実行時の記録です。バックエンド起動後に接続していないGUIの設定は取得できません。
-旧版バックエンドで設定取得APIが使えない場合は、その旨を記録し、raw取得は継続します。</p>
+<h2 id="display-conversion">16. Floating-point electron/photon display and settings metadata (v0.3.0)</h2>
+<p>Select Counts / Electrons / Photons under Display units in the <strong>Display conversion</strong> tab.
+Camera calibration uses SDK GetSensitivity and GetQE. RealGain uses the gain setpoint, and EM off uses nominal unity gain;
+metadata distinguishes these from independently measured physical gains. If physical gain is unknown in DAC/Linear mode or the SDK cannot supply coefficients,
+switch to Manual coefficients and enter Sensitivity (e⁻/ADU), Physical EM gain, QE (%), and Baseline (ADU).
+Switching from Camera calibration to Manual lets you edit the last displayed coefficients.</p>
+<p>The conversion is <code>electrons = (raw − offset) × sensitivity / EM gain</code>,
+and <code>photons = electrons / QE</code>, with QE expressed from 0 to 1. With a background ROI, that frame's ROI mean replaces offset;
+the baseline is not subtracted twice. Set the camera's <strong>SDK conversion (integer)</strong> to Counts.
+Display conversion uses float32 and preserves fractional and negative values. Normal Save frame / Record / Stream recording preserve the original pixels.
+<strong>Save converted</strong> exports float32 TIFF/FITS/NPY after averaging, background correction, and unit conversion, before colormapping or thresholding.
+ROI statistics, formulas, and UDP output remain in raw units. Converted values are estimates; coefficients alone do not establish exact integer photon counts.</p>
+<p>Each raw TIFF page's <code>analysis</code> records background ROI coordinates, mean, and pixel count, plus GUI settings, applied coefficients, and conversion formulas.
+Metadata is also stored in FITS/PNG JSON tags and NPY <code>.npy.json</code> sidecars. When exporting older backend frames,
+metadata explicitly identifies GUI settings as a snapshot taken at save time. New backend frame headers also contain camera settings from acquisition time.</p>
+<p>Each connected GUI publishes its display, calibration, ROI, formula, UDP, trend, window-layout, and other settings to the backend.
+BLACS saves the snapshot taken during transition to buffered mode as JSON at <code>data/&lt;device&gt;/camera/images/gui_settings_snapshot</code>.
+The micro0 and gen0 GUIs have separate profiles, including source and update time. Camera-derived coefficients are refreshed using the actual shot settings,
+and per-frame background means and conversion details are saved in <code>frame_display_metadata</code>. Raw images are saved as Counts, with PNG/HDF5 previews.
+This is a runtime record, not a compile-time record. Settings are unavailable for GUIs that have not connected since the backend started.
+If an older backend lacks the settings-snapshot API, the metadata records that limitation and raw acquisition continues.</p>
 </main>
 </body>
 </html>
