@@ -45,6 +45,7 @@ class AndorCamera : public Camera {
   TemperatureReading ReadTemperature() override;
   Timings GetTimings() override;
   Json GetCalibration(double wavelength_nm) override;
+  Json GetQeTable(double wavelength_nm) override;
 
  private:
   void QueryInfo();

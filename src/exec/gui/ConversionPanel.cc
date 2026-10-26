@@ -4,9 +4,12 @@
 #include <QDoubleSpinBox>
 #include <QFormLayout>
 #include <QLabel>
+#include <QPushButton>
 #include <QSettings>
 #include <QSignalBlocker>
 #include <QWheelEvent>
+#include <cmath>
+#include <stdexcept>
 
 namespace AndorEMCCDcontroller {
 namespace {
@@ -54,6 +57,17 @@ ConversionPanel::ConversionPanel(QWidget* parent) : QWidget(parent) {
                        0.000001, 1e6, 1);
   gain_ = field("display_em_gain", tr("Physical EM gain"), 0.000001, 1e6, 1);
   qe_ = field("display_qe", tr("Quantum efficiency (%)"), 0.000001, 100, 100);
+  load_qe_ = new QPushButton(tr("Load QE from SDK table"), this);
+  load_qe_->setObjectName("load_qe_table");
+  load_qe_->setToolTip(
+      tr("Read the backend's sensor-model table at the selected "
+         "wavelength and switch to editable manual coefficients. "
+         "No exposure or camera setting change is needed."));
+  form->addRow(load_qe_);
+  qe_reference_label_ = new QLabel(this);
+  qe_reference_label_->setObjectName("qe_table_status");
+  qe_reference_label_->setWordWrap(true);
+  form->addRow(qe_reference_label_);
   baseline_ = field("display_baseline", tr("Baseline (ADU)"), -1e9, 1e9, 100);
   auto* hint = new QLabel(
       tr("Electrons = (raw − offset) × sensitivity / EM gain.\n"
@@ -75,6 +89,14 @@ ConversionPanel::ConversionPanel(QWidget* parent) : QWidget(parent) {
     UpdateSource();
     emit Changed();
   });
+  connect(load_qe_, &QPushButton::clicked, this,
+          &ConversionPanel::LoadQeTableRequested);
+  connect(qe_, &QDoubleSpinBox::valueChanged, this, [this] {
+    qe_from_table_ = false;
+    UpdateQeReference();
+  });
+  connect(wavelength_, &QDoubleSpinBox::valueChanged, this,
+          &ConversionPanel::UpdateQeReference);
   UpdateSource();
 }
 
@@ -87,6 +109,10 @@ Json ConversionPanel::Config() const {
               {"sensitivity_e_per_adu", sensitivity_->value()},
               {"em_gain", gain_->value()},
               {"qe", qe_->value() / 100.0},
+              {"qe_source", source_->currentIndex() == 0 ? "camera"
+                            : qe_from_table_             ? "sdk_qe_table"
+                                                         : "manual"},
+              {"qe_reference", qe_reference_},
               {"baseline_adu", baseline_->value()}};
 }
 
@@ -101,6 +127,8 @@ void ConversionPanel::SetConfig(const Json& config) {
   gain_->setValue(config.value("em_gain", 1.0));
   qe_->setValue(100 * config.value("qe", 1.0));
   baseline_->setValue(config.value("baseline_adu", 100.0));
+  qe_reference_ = config.value("qe_reference", Json::object());
+  qe_from_table_ = config.value("qe_source", "manual") == "sdk_qe_table";
   UpdateSource();
 }
 
@@ -137,7 +165,81 @@ void ConversionPanel::SetCalibration(const Json& calibration) {
 void ConversionPanel::UpdateSource() {
   for (auto* spin : {sensitivity_, gain_, qe_, baseline_})
     spin->setEnabled(source_->currentIndex() != 0);
-  if (source_->currentIndex() == 0) SetCalibration(calibration_);
+  if (source_->currentIndex() == 0) {
+    qe_from_table_ = false;
+    SetCalibration(calibration_);
+  }
+  UpdateQeReference();
+}
+
+void ConversionPanel::ApplyQeTable(const Json& reference) {
+  const double qe = reference.at("qe").get<double>();
+  const double wavelength = reference.at("wavelength_nm").get<double>();
+  if (!std::isfinite(qe) || qe < qe_->minimum() / 100.0 || qe > 1 ||
+      !std::isfinite(wavelength) ||
+      std::abs(wavelength - wavelength_->value()) > 0.000001)
+    throw std::runtime_error(
+        "Invalid QE table response or wavelength mismatch");
+  // Do not turn unavailable camera coefficients into apparently calibrated
+  // manual defaults when automatically switching sources.
+  if (source_->currentIndex() == 0) {
+    for (const char* key :
+         {"sensitivity_e_per_adu", "em_gain", "baseline_adu"}) {
+      if (!calibration_.contains(key) || !calibration_[key].is_number() ||
+          !std::isfinite(calibration_[key].get<double>()) ||
+          (std::string(key) != "baseline_adu" && calibration_[key] <= 0))
+        throw std::runtime_error(
+            "Camera coefficients are incomplete. Select Manual coefficients "
+            "and enter sensitivity, physical EM gain and baseline first.");
+    }
+  }
+  {
+    const QSignalBlocker block_source(source_);
+    const QSignalBlocker block_qe(qe_);
+    source_->setCurrentIndex(1);
+    qe_->setValue(100 * qe);
+  }
+  qe_reference_ = reference;
+  qe_from_table_ = true;
+  UpdateSource();
+  emit Changed();
+}
+
+void ConversionPanel::SetQeTableError(const QString& error) {
+  qe_reference_label_->setText(tr("QE table: %1").arg(error));
+  qe_reference_label_->setStyleSheet("color: #c62828;");
+}
+
+void ConversionPanel::UpdateQeReference() {
+  qe_reference_label_->setStyleSheet("");
+  if (qe_reference_.empty() || !qe_reference_.is_object()) {
+    qe_reference_label_->clear();
+    return;
+  }
+  const double wavelength = qe_reference_.value("wavelength_nm", 0.0);
+  const bool stale =
+      qe_from_table_ && std::abs(wavelength - wavelength_->value()) > 0.000001;
+  const QString reference =
+      tr("%1: %2% at %3 nm (sensor-model reference)")
+          .arg(QString::fromStdString(
+              qe_reference_.value("table_file", "SDK table")))
+          .arg(100 * qe_reference_.value("qe", 0.0), 0, 'g', 8)
+          .arg(wavelength, 0, 'g', 10);
+  qe_reference_label_->setToolTip(
+      QString::fromStdString(qe_reference_.dump(2)));
+  if (source_->currentIndex() == 0) {
+    qe_reference_label_->setText(
+        tr("Saved table reference (inactive): %1").arg(reference));
+  } else if (stale) {
+    SetQeTableError(
+        tr("Wavelength changed. Reload QE or enter a manual value.\n%1")
+            .arg(reference));
+  } else {
+    qe_reference_label_->setText(
+        qe_from_table_
+            ? reference
+            : tr("Manual QE override. Previous reference: %1").arg(reference));
+  }
 }
 
 void ConversionPanel::ShowResult(const Json& result) {

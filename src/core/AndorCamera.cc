@@ -8,6 +8,7 @@
  */
 
 #include <AndorEMCCDcontroller/AndorCamera.h>
+#include <AndorEMCCDcontroller/QeTable.h>
 
 #include <algorithm>
 #include <cmath>
@@ -786,6 +787,12 @@ Timings AndorCamera::GetTimings() { return timings_; }
 
 std::unique_ptr<Camera> MakeAndorCamera(const std::string& config_dir) {
   return std::make_unique<AndorCamera>(config_dir);
+}
+
+Json AndorCamera::GetQeTable(double wavelength_nm) {
+  Json reference = ReadSdkQeTable(config_dir_, info_.head_model, wavelength_nm);
+  reference["sdk_version"] = info_.sdk_version;
+  return reference;
 }
 
 Json AndorCamera::GetCalibration(double wavelength_nm) {

@@ -209,6 +209,20 @@ void MainWindow::BuildUi() {
     calibration_dirty_ = true;
     last_rendered_seq_ = UINT64_MAX;
   });
+  connect(conversion_panel_, &ConversionPanel::LoadQeTableRequested, this, [this] {
+    try {
+      if (!control_) throw std::runtime_error("Connect to the camera backend first");
+      RefreshCalibration();
+      Json reference = control_->Request("get_qe_table",
+          {{"wavelength_nm", ConversionConfig()["wavelength_nm"]}}, 2000);
+      reference["backend_host"] = address_.host;
+      reference["loaded_at"] = UnixTimeNow();
+      conversion_panel_->ApplyQeTable(reference);
+      RefreshDisplayMetadata();
+    } catch (const std::exception& e) {
+      conversion_panel_->SetQeTableError(QString::fromUtf8(e.what()));
+    }
+  });
   tb->addAction(tr("Save converted…"), this, &MainWindow::SaveConvertedFrame)
       ->setToolTip(tr("Save displayed values as float32 TIFF, FITS or NPY"));
 

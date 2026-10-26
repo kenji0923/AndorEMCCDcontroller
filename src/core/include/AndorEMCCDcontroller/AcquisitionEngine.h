@@ -86,6 +86,7 @@ class AcquisitionEngine {
   Json GetInfo();
   Json GetSettings();
   Json GetCalibration(double wavelength_nm);
+  Json GetQeTable(double wavelength_nm);
   /** Merges @p patch; restarts a running continuous acquisition. */
   Json SetSettings(const Json& patch);
   /** Starts a run with the current settings (optional "settings" patch). */

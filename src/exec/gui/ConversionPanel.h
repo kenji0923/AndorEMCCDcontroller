@@ -7,6 +7,7 @@
 class QComboBox;
 class QDoubleSpinBox;
 class QLabel;
+class QPushButton;
 
 namespace AndorEMCCDcontroller {
 class ConversionPanel : public QWidget {
@@ -17,11 +18,15 @@ class ConversionPanel : public QWidget {
   void SetConfig(const Json& config);
   void SetCalibration(const Json& calibration);
   void ShowResult(const Json& result);
+  void ApplyQeTable(const Json& reference);
+  void SetQeTableError(const QString& error);
  signals:
   void Changed();
+  void LoadQeTableRequested();
 
  private:
   void UpdateSource();
+  void UpdateQeReference();
   QComboBox* units_;
   QComboBox* source_;
   QDoubleSpinBox* wavelength_;
@@ -31,7 +36,11 @@ class ConversionPanel : public QWidget {
   QDoubleSpinBox* baseline_;
   QLabel* status_;
   QLabel* camera_values_;
+  QLabel* qe_reference_label_;
+  QPushButton* load_qe_;
   Json calibration_ = Json::object();
+  Json qe_reference_ = Json::object();
+  bool qe_from_table_ = false;
 };
 }  // namespace AndorEMCCDcontroller
 #endif

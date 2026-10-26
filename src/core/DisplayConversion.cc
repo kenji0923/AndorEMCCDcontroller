@@ -76,6 +76,14 @@ Json ResolveDisplayConversion(const Json& input_config,
     scale = sensitivity / gain;
     offset = Number(values, "baseline_adu");
     if (units == "photons") {
+      if (!camera && config.value("qe_source", "manual") == "sdk_qe_table") {
+        const Json reference = config.value("qe_reference", Json::object());
+        const double reference_wavelength = Number(reference, "wavelength_nm");
+        const double wavelength = Number(config, "wavelength_nm");
+        if (!std::isfinite(reference_wavelength) || !std::isfinite(wavelength) ||
+            std::abs(reference_wavelength - wavelength) > 0.000001)
+          return fail("Wavelength changed: reload SDK table QE or enter a manual value");
+      }
       const double qe = Number(values, "qe");
       if (!(std::isfinite(qe) && qe > 0 && qe <= 1))
         return fail("Quantum efficiency must be available and between 0 and 1");

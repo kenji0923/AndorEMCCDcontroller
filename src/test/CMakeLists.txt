@@ -21,6 +21,9 @@ if(AEC_BUILD_GUI)
 endif()
 
 if(AEC_BUILD_BACKEND)
+    aec_add_test(test_qe_table test_qe_table.cc)
+    target_link_libraries(test_qe_table PRIVATE AndorEMCCDcontroller::Camera)
+
     aec_add_test(test_telemetry test_telemetry.cc)
     target_link_libraries(test_telemetry PRIVATE AndorEMCCDcontroller::Engine)
 
@@ -33,6 +36,12 @@ if(AEC_BUILD_BACKEND)
 endif()
 
 if(AEC_BUILD_GUI)
+    aec_add_test(test_conversion_panel test_conversion_panel.cc
+        ../exec/gui/ConversionPanel.cc ../exec/gui/ConversionPanel.h)
+    set_target_properties(test_conversion_panel PROPERTIES AUTOMOC ON)
+    target_link_libraries(test_conversion_panel PRIVATE
+        AndorEMCCDcontroller::Protocol Qt6::Widgets)
+
     aec_add_test(test_stream_client test_stream_client.cc)
     target_link_libraries(test_stream_client PRIVATE AndorEMCCDcontroller::Client)
 endif()

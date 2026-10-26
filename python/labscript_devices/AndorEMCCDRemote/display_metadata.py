@@ -62,6 +62,11 @@ def frame_display_metadata(raw, snapshot):
                 scale = sensitivity / gain
                 offset = values.get("baseline_adu")
                 if units == "photons":
+                    if config.get("source", "camera") != "camera" and config.get("qe_source") == "sdk_qe_table":
+                        reference_wavelength = float(config.get("qe_reference", {})["wavelength_nm"])
+                        wavelength = float(config["wavelength_nm"])
+                        if not (math.isfinite(reference_wavelength) and math.isfinite(wavelength)) or abs(reference_wavelength - wavelength) > 1e-6:
+                            raise ValueError("Wavelength changed: reload SDK table QE or enter a manual value")
                     qe = float(values["qe"])
                     if not 0 < qe <= 1:
                         raise ValueError("Invalid quantum efficiency")

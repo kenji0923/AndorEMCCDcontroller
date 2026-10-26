@@ -236,6 +236,8 @@ Json ControlServer::Dispatch(const std::string& cmd, const Json& args,
   if (cmd == "get_settings") return engine_->GetSettings();
   if (cmd == "get_calibration")
     return engine_->GetCalibration(args.value("wavelength_nm", 780.0));
+  if (cmd == "get_qe_table")
+    return engine_->GetQeTable(args.at("wavelength_nm").get<double>());
   if (cmd == "set_settings") {
     return engine_->SetSettings(args.contains("settings") ? args.at("settings")
                                                           : args);

@@ -157,6 +157,13 @@ TEST(Backend, ArmWaitFetchAndLiveStream) {
   // Display profiles and calibration do not acquire camera control.
   const auto calibration = client.Request("get_calibration", {{"wavelength_nm", 780}});
   EXPECT_EQ(calibration["qe"], .8);
+  try {
+    client.Request("get_qe_table", {{"wavelength_nm", 422}});
+    ADD_FAILURE() << "Simulator supplied a manufacturer QE table";
+  } catch (const aec::ClientError& e) {
+    EXPECT_NE(std::string(e.what()).find("unavailable"), std::string::npos);
+    EXPECT_NE(e.code(), "not_controller");
+  }
   EXPECT_TRUE(client.Request("set_display_profile", {{"profile_id", "gen0"},
       {"profile", {{"units", "photons"}}}})["stored"].get<bool>());
   EXPECT_EQ(client.Request("get_display_profiles")["gen0"]["profile"]["units"], "photons");

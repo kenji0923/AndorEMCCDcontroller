@@ -92,7 +92,8 @@ if(AEC_BUILD_BACKEND)
 
     AndorEMCCDcontroller_add_library_std(Camera Camera)
     target_sources(Camera PRIVATE
-        SimCamera.cc include/${PROJECT_NAME}/SimCamera.h)
+        SimCamera.cc include/${PROJECT_NAME}/SimCamera.h
+        QeTable.cc include/${PROJECT_NAME}/QeTable.h)
     target_link_libraries(Camera PUBLIC Protocol Threads::Threads)
     if(AEC_HAVE_ANDOR_SDK)
         target_sources(Camera PRIVATE

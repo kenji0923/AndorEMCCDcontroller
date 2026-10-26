@@ -189,6 +189,12 @@ Json AcquisitionEngine::GetCalibration(double wavelength_nm) {
   });
 }
 
+Json AcquisitionEngine::GetQeTable(double wavelength_nm) {
+  return Call([this, wavelength_nm] {
+    return camera_->GetQeTable(wavelength_nm);
+  });
+}
+
 Json AcquisitionEngine::SetSettings(const Json& patch) {
   return Call([this, patch] { return DoSetSettings(patch); });
 }

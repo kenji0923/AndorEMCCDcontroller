@@ -501,6 +501,32 @@ def test_display_metadata_preserves_fractional_bg_and_raw():
     np.testing.assert_array_equal(before, raw)
 
 
+@pytest.mark.parametrize("wavelength,source,valid", [
+    (422, "sdk_qe_table", True), (780, "sdk_qe_table", False),
+    (float("nan"), "sdk_qe_table", False), (780, "manual", True)])
+def test_shot_metadata_checks_qe_table_wavelength(wavelength, source, valid):
+    from AndorEMCCDRemote.display_metadata import capture_display_profiles, frame_display_metadata
+    reference = dict(wavelength_nm=422, qe=.61, table_file="BV.txt",
+                     source="sdk_qe_table", head_model="DU897_BV")
+    config = dict(units="photons", source="manual", sensitivity_e_per_adu=2,
+                  em_gain=10, qe=.61, baseline_adu=100, wavelength_nm=wavelength,
+                  qe_source=source, qe_reference=reference)
+    profile = {"display": {"conversion": config}}
+    client = MagicMock()
+    client.request.side_effect = [{"gui": {"profile": profile, "updated_at": time.time()}}, {}]
+    snapshot = capture_display_profiles(client)
+    saved = snapshot["profiles"]["gui"]["profile"]["display"]["conversion"]
+    assert saved["qe_reference"] == reference
+    raw = np.array([[100, 101]], dtype=np.uint16)
+    conversion = frame_display_metadata(raw, snapshot)["gui"]["conversion"]
+    assert conversion["valid"] is valid
+    if valid:
+        assert conversion["scale"] == pytest.approx(2 / 10 / .61)
+    else:
+        assert "Wavelength changed" in conversion["error"]
+    np.testing.assert_array_equal(raw, [[100, 101]])
+
+
 def test_shot_snapshots_remote_gui_and_actual_shot_calibration(worker, tmp_path):
     import json
     worker.connect_to_device()

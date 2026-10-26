@@ -11,4 +11,4 @@ __all__ = ["AndorEMCCDClient", "AndorEMCCDError", "FrameSubscriber",
            "local_address",
            "frame_to_array", "resolve_endpoints", "DEFAULT_CONTROL_PORT",
            "DEFAULT_DATA_PORT"]
-__version__ = "0.3.0"
+__version__ = "0.3.1"

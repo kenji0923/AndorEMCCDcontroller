@@ -1,6 +1,6 @@
 {
   "name": "andor-emccd-controller",
-  "version-string": "0.3.0",
+  "version-string": "0.3.1",
   "description": "Frontend dependencies for Windows builds (Qt comes from the Qt installer).",
   "dependencies": [
     "zeromq",

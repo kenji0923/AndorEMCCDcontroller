@@ -11,6 +11,7 @@
 
 #include <limits>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -123,6 +124,10 @@ class Camera {
   // Read-only SDK calibration; unsupported values remain absent/null.
   virtual Json GetCalibration(double wavelength_nm) {
     return Json{{"wavelength_nm", wavelength_nm}, {"source", "unavailable"}};
+  }
+  virtual Json GetQeTable(double wavelength_nm) {
+    (void)wavelength_nm;
+    throw std::runtime_error("SDK QE tables are unavailable for this camera");
   }
 };
 
