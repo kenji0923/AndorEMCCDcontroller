@@ -74,10 +74,12 @@ try {
         if ($backup -and !(Test-Path -LiteralPath $target)) { Move-Item -LiteralPath $backup -Destination $target }
         throw
     }
+    # Keep the old installation only until the replacement succeeds.
+    if ($backup) { Remove-Item -LiteralPath $backup -Recurse -Force }
 } finally {
     if (Test-Path -LiteralPath $incoming) { Remove-Item -LiteralPath $incoming -Recurse -Force }
 }
-@{hostname=$env:COMPUTERNAME;target=$target;backup=$backup;tag=$p.tag;version=(Get-Content -Raw (Join-Path $p.stage 'version.txt')).Trim()} | ConvertTo-Json -Compress
+@{hostname=$env:COMPUTERNAME;target=$target;tag=$p.tag;version=(Get-Content -Raw (Join-Path $p.stage 'version.txt')).Trim()} | ConvertTo-Json -Compress
 '''
 CLEANUP = r'''Remove-Item -LiteralPath $p.stage -Recurse -Force'''
 
@@ -200,8 +202,6 @@ def main(argv=None):
                     "& (Join-Path $p.stage 'install.ps1') -PayloadBase64 $p.data",
                     dict(stage=stage, data=encoded))
                 print(f"  Installed {installed['tag']}: {installed['target']}", flush=True)
-                if installed['backup']:
-                    print(f"  Backup: {installed['backup']}", flush=True)
             except (RuntimeError, ValueError, KeyError) as error:
                 failures.append(host)
                 print(f'{host}: ERROR: {error}', file=sys.stderr, flush=True)
