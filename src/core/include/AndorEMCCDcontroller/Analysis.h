@@ -23,6 +23,7 @@ struct Roi {
   int height = 1;
   bool enabled = true;
   std::uint32_t color = 0xff4040;  ///< 0xRRGGBB, for drawing.
+  bool background = false;  ///< Use this enabled ROI to estimate display BG.
 };
 
 void to_json(Json& j, const Roi& r);
@@ -53,6 +54,12 @@ RoiStats ComputeRoiStats(const FrameHeader& header, const std::uint8_t* data,
 /** Pixel value at (x, y), or NaN outside the frame. */
 double PixelValue(const FrameHeader& header, const std::uint8_t* data, int x,
                   int y);
+
+/** Mean background and source ROI; empty if no enabled BG ROI is selected. */
+Json MeasureBackground(const Frame& frame, const std::vector<Roi>& rois);
+/** A float display copy, preserving negative values and the original payload.
+ */
+Frame SubtractBackground(const Frame& frame, double background);
 
 /** Min and max of a whole frame. */
 void FrameMinMax(const FrameHeader& header, const std::uint8_t* data,

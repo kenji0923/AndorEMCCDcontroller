@@ -170,3 +170,33 @@ TEST(Colormap, KnownMaps) {
   EXPECT_EQ(viridis[0], 0x440154u);  // matplotlib viridis start color.
   EXPECT_EQ(aec::GetColormap("viridis", true)[255], 0x440154u);
 }
+
+TEST(Analysis, BackgroundMeanAndFloatDisplayDoNotModifyRaw) {
+  const aec::Frame raw = MakeFrame();
+  aec::Roi bg;
+  bg.name = "bg";
+  bg.width = 2;
+  bg.height = 1;
+  bg.background = true;
+  const auto metadata = aec::MeasureBackground(raw, {bg});
+  ASSERT_TRUE(metadata.at("valid").get<bool>());
+  EXPECT_DOUBLE_EQ(metadata.at("mean").get<double>(), .5);
+  EXPECT_DOUBLE_EQ(metadata.at("sum").get<double>(), 1);
+  EXPECT_EQ(metadata.at("count"), 2);
+  const auto display = aec::SubtractBackground(raw, .5);
+  EXPECT_EQ(raw.header.pixel_type, aec::PixelType::kUint16);
+  EXPECT_EQ(display.header.pixel_type, aec::PixelType::kFloat32);
+  EXPECT_NE(raw.data, display.data);
+  EXPECT_DOUBLE_EQ(aec::PixelValue(raw.header, raw.data->data(), 0, 0), 0);
+  EXPECT_DOUBLE_EQ(aec::PixelValue(display.header, display.data->data(), 0, 0),
+                   -.5);
+  EXPECT_DOUBLE_EQ(aec::PixelValue(display.header, display.data->data(), 1, 0),
+                   .5);
+  aec::Json saved = bg;
+  EXPECT_TRUE(saved.get<aec::Roi>().background);
+  bg.enabled = false;
+  EXPECT_TRUE(aec::MeasureBackground(raw, {bg}).empty());
+  bg.enabled = true;
+  bg.x = 100;
+  EXPECT_FALSE(aec::MeasureBackground(raw, {bg})["valid"].get<bool>());
+}

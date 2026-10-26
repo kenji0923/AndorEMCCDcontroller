@@ -445,6 +445,22 @@ AndorEMCCDRemote("emccd", parent_device=trigger_do, connection="trigger",
 </ul>
 <p><b>おすすめの設定</b>（暗い信号、EM ゲインあり）：−80〜−85 °C、EM 10 MHz ×1.0、縦方向 0.3 µs Normal（尾を引かないことを確認してから）、DAC モードの上限付近、暗画像は shutter closed。CIC が支配的な短い露光ほど、縦方向の速度の効果が大きくなります。</p>
 
+<h2 id="release-deployment">GitHubリリースをWindowsへ配置</h2>
+<p>開発PCでPython 3、GitHub CLI（gh）、ssh、scpを用意し、必要なら <code>gh auth login</code> を実行します。SSHの接続名は通常の <code>~/.ssh/config</code> を使います。</p>
+<pre><code># 最新の公開リリースをmicro0とgen0へ配置
+python3 deploy/deploy_windows_release.py
+# 変更せずにリリース・ホスト名・配置先を確認
+python3 deploy/deploy_windows_release.py --dry-run
+# 版別フォルダーへ配置（起動中の旧版を保持）
+python3 deploy/deploy_windows_release.py --versioned
+# 特定のリリース・PCを指定
+python3 deploy/deploy_windows_release.py --tag v0.2.1 micro0
+# 配置先ルートとSSH設定を指定
+python3 deploy/deploy_windows_release.py --root 'D:\tools' --ssh-config ~/.ssh/config micro0 gen0</code></pre>
+<p>既定の配置先は <code>C:\local\andor_emccd_gui-windows-x64</code> です。<code>--versioned</code> ではフォルダー名にリリースタグが付きます。ZIPを1回ダウンロードし、各PCでSHA-256を照合、展開、実行ファイルの起動確認を行ってから配置します。既存フォルダーは日時付きでバックアップし、配置失敗時は復元します。同じリリースを配置済みで実行ファイルも一致する場合は変更しません。GUIの停止・起動やショートカット変更は行わず、対象フォルダーのGUIが起動中ならエラーにします。認証や配置に失敗したPCがあっても、残りのPCを処理して終了コード1を返します。GitHub Actionsのビルド成果物ではなく、公開リリースのZIPが対象です。</p>
+<h2 id="background-roi">背景ROIによる表示補正</h2>
+<p>AnalysisのROI表で1つのROIの <b>BG</b> をチェックし、<b>On</b> を有効にします。Displayの <b>Subtract background ROI</b> を有効にすると、そのROIの平均画素値を全画素から引いた画像を表示します。表示平均化の後、しきい値表示とカラーマップの前に処理し、負値も保持します。画像外のROIや無効なROIでは補正せず、その旨を表示します。</p>
+<p>ROI統計・式・UDPと保存される画素値は受信rawのままです。各フレームに背景ROI座標、平均・合計・画素数を <code>analysis.background</code> として付加します。TIFFのImageDescription、PNGのDescription、FITSのCOMMENTに格納し、NPYでは <code>.npy.json</code> を併記します。ストリーム保存の各TIFFページにもフレームごとのBG情報が入ります。画像サイズやビニングを変えた場合、ROI座標は新しい画像の画素座標で解釈されるので範囲を確認してください。ここでのrawはバックエンドから受信した画素値です。SDKのCount Convertを有効にした場合は、受信時点で既に整数の電子数／光子数へ換算されています。</p>
 <h2 id="windows">10. Windows でのビルド</h2>
 <p>Windows ではフロントエンド（GUI とテスト）だけをビルドします（<code>AEC_BUILD_BACKEND</code> は自動で OFF）。Windows PC（Windows 11、Visual Studio Build Tools 2026）で、以下の手順によるビルド、テスト 15 件の通過、LAN 越しのライブ表示、変更権の取得と解放、多重起動の防止を確認しました（2026-10-16）。管理者権限は不要で、ライブラリはすべて <code>%USERPROFILE%\Opt</code> に入れます。</p>
 <ol>

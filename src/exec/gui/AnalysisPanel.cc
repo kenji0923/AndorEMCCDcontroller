@@ -33,7 +33,7 @@ namespace AndorEMCCDcontroller {
 
 namespace {
 
-enum RoiColumn { kName, kX, kY, kW, kH, kOn, kFirstStat };
+enum RoiColumn { kName, kX, kY, kW, kH, kOn, kBackground, kFirstStat };
 constexpr int kStatColumns = 5;  // sum max min mean std
 enum FormulaColumn { kFName, kFFormula, kFValue };
 enum UdpColumn { kUOn, kUVariable, kUHost, kUPort, kUFormat };
@@ -63,9 +63,10 @@ AnalysisPanel::AnalysisPanel(QWidget* parent) : QWidget(parent) {
   auto* roi_box = new QGroupBox(tr("Regions of interest"), this);
   auto* roi_layout = new QVBoxLayout(roi_box);
   rois_ = new QTableWidget(0, kFirstStat + kStatColumns, roi_box);
-  rois_->setHorizontalHeaderLabels({tr("Name"), tr("X"), tr("Y"), tr("W"),
-                                    tr("H"), tr("On"), tr("Sum"), tr("Max"),
-                                    tr("Min"), tr("Mean"), tr("Std")});
+  rois_->setObjectName("analysis_rois");
+  rois_->setHorizontalHeaderLabels(
+      {tr("Name"), tr("X"), tr("Y"), tr("W"), tr("H"), tr("On"), tr("BG"),
+       tr("Sum"), tr("Max"), tr("Min"), tr("Mean"), tr("Std")});
   rois_->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
   rois_->verticalHeader()->hide();
   rois_->setSelectionBehavior(QAbstractItemView::SelectRows);
@@ -152,6 +153,14 @@ AnalysisPanel::AnalysisPanel(QWidget* parent) : QWidget(parent) {
   connect(draw_roi, &QPushButton::toggled, this, &AnalysisPanel::DrawRoiToggled);
   connect(rois_, &QTableWidget::itemChanged, this, [this](QTableWidgetItem* item) {
     if (updating_ || item->column() >= kFirstStat) return;
+    if (item->column() == kBackground && item->checkState() == Qt::Checked) {
+      updating_ = true;
+      for (int row = 0; row < rois_->rowCount(); ++row) {
+        if (row != item->row())
+          rois_->item(row, kBackground)->setCheckState(Qt::Unchecked);
+      }
+      updating_ = false;
+    }
     UpdateVariableHelp();
     emit ConfigChanged();
   });
@@ -223,6 +232,14 @@ void AnalysisPanel::AddRoiRow(const Roi& roi) {
                Qt::ItemIsSelectable);
   on->setCheckState(roi.enabled ? Qt::Checked : Qt::Unchecked);
   rois_->setItem(row, kOn, on);
+  auto* background = new QTableWidgetItem();
+  background->setFlags(Qt::ItemIsUserCheckable | Qt::ItemIsEnabled |
+                       Qt::ItemIsSelectable);
+  background->setCheckState(roi.background ? Qt::Checked : Qt::Unchecked);
+  background->setToolTip(
+      tr("Use this ROI's mean as the background per pixel. Select one enabled "
+         "ROI."));
+  rois_->setItem(row, kBackground, background);
   for (int c = 0; c < kStatColumns; ++c) {
     rois_->setItem(row, kFirstStat + c, ReadOnly(QString()));
   }
@@ -280,6 +297,7 @@ std::vector<Roi> AnalysisPanel::Rois() const {
     r.enabled = rois_->item(row, kOn)->checkState() == Qt::Checked &&
                 IsValidIdentifier(r.name);
     r.color = rois_->item(row, kName)->data(Qt::UserRole).toUInt();
+    r.background = rois_->item(row, kBackground)->checkState() == Qt::Checked;
     out.push_back(r);
   }
   return out;

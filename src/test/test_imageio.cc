@@ -165,3 +165,29 @@ TEST(ImageIO, OrientationIsRecordedInFiles) {
   EXPECT_EQ(rotation, 90);
   EXPECT_EQ(flip_h, 0);
 }
+
+TEST(ImageIO, RawTiffPreservesBackgroundAnnotations) {
+  aec::Frame f;
+  f.header.width = 2;
+  f.header.height = 1;
+  auto payload = std::make_shared<std::vector<std::uint8_t>>(4);
+  std::uint16_t values[2] = {100, 101};
+  std::memcpy(payload->data(), values, sizeof(values));
+  f.data = payload;
+  f.analysis = {{"background",
+                 {{"mean", 100.5},
+                  {"sum", 201},
+                  {"count", 2},
+                  {"roi", {{"x", 0}, {"y", 0}, {"width", 2}, {"height", 1}}}}}};
+  const auto path =
+      (std::filesystem::temp_directory_path() / "aec_bg_metadata.tif").string();
+  std::string error;
+  ASSERT_TRUE(aec::WriteTiff(path, {f}, {{"display_only", true}}, &error))
+      << error;
+  std::vector<aec::Frame> back;
+  ASSERT_TRUE(aec::ReadTiff(path, &back, &error)) << error;
+  ASSERT_EQ(back.size(), 1u);
+  EXPECT_EQ(*back[0].data, *payload);
+  EXPECT_EQ(back[0].analysis, f.analysis);
+  std::filesystem::remove(path);
+}

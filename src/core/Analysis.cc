@@ -52,10 +52,10 @@ void Dispatch(const FrameHeader& h, const std::uint8_t* data, int x0, int y0,
 }  // namespace
 
 void to_json(Json& j, const Roi& r) {
-  j = Json{{"name", r.name},   {"x", r.x},
-           {"y", r.y},         {"width", r.width},
+  j = Json{{"name", r.name},     {"x", r.x},
+           {"y", r.y},           {"width", r.width},
            {"height", r.height}, {"enabled", r.enabled},
-           {"color", r.color}};
+           {"color", r.color},   {"background", r.background}};
 }
 
 void from_json(const Json& j, Roi& r) {
@@ -66,6 +66,43 @@ void from_json(const Json& j, Roi& r) {
   r.height = j.value("height", 1);
   r.enabled = j.value("enabled", true);
   r.color = j.value("color", 0xff4040u);
+  r.background = j.value("background", false);
+}
+
+Json MeasureBackground(const Frame& frame, const std::vector<Roi>& rois) {
+  for (const auto& roi : rois) {
+    if (!roi.enabled || !roi.background) continue;
+    const auto stats = ComputeRoiStats(
+        frame.header, frame.data ? frame.data->data() : nullptr, roi);
+    return Json{{"roi", roi},
+                {"estimator", "mean"},
+                {"sum", stats.sum},
+                {"mean", stats.mean},
+                {"count", stats.count},
+                {"valid", stats.count > 0 && std::isfinite(stats.mean)},
+                {"raw_pixels_modified", false}};
+  }
+  return Json::object();
+}
+
+Frame SubtractBackground(const Frame& frame, double background) {
+  Frame out = frame;
+  if (!frame.data || !std::isfinite(background)) return out;
+  out.header.pixel_type = PixelType::kFloat32;
+  auto pixels =
+      std::make_shared<std::vector<std::uint8_t>>(out.header.PayloadBytes());
+  for (int y = 0; y < frame.header.height; ++y) {
+    for (int x = 0; x < frame.header.width; ++x) {
+      const float value = static_cast<float>(
+          PixelValue(frame.header, frame.data->data(), x, y) - background);
+      const auto index = static_cast<std::size_t>(y) * frame.header.width + x;
+      std::memcpy(pixels->data() + index * sizeof(value), &value,
+                  sizeof(value));
+    }
+  }
+  out.data = std::move(pixels);
+  out.analysis["background_subtracted"] = true;
+  return out;
 }
 
 const std::vector<std::string>& StatNames() {

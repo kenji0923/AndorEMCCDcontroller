@@ -319,7 +319,8 @@ void MainWindow::BuildDisplayDock() {
   threshold_mode_->setObjectName("display_threshold_enabled");
   threshold_mode_->setToolTip(
       tr("Pixels at or above the threshold are white; lower pixels are black. "
-         "Applied after display averaging. Raw recording and analysis keep "
+         "Applied after display averaging and optional background subtraction. "
+         "Raw recording and analysis keep "
          "the original values."));
   threshold_ = new QDoubleSpinBox(w);
   threshold_->setObjectName("display_threshold");
@@ -349,8 +350,17 @@ void MainWindow::BuildDisplayDock() {
   average_used_ = new QLabel(w);
   form->addRow(tr("Average (frames)"), average_frames_);
   form->addRow(tr("Images averaged"), average_used_);
+  background_subtract_ = new QCheckBox(tr("Subtract background ROI"), w);
+  background_subtract_->setObjectName("display_background_subtract");
+  background_subtract_->setToolTip(tr(
+      "Select one enabled ROI in the Analysis table's BG column. Subtract its "
+      "mean per pixel for display only; negative values are preserved."));
+  background_value_ = new QLabel(w);
+  background_value_->setObjectName("display_background_value");
+  form->addRow(background_subtract_);
+  form->addRow(tr("BG / pixel"), background_value_);
   form->addRow(threshold_mode_);
-  form->addRow(tr("Threshold (raw units)"), threshold_);
+  form->addRow(tr("Threshold (display units)"), threshold_);
   form->addRow(tr("Colormap"), cmap_row);
   form->addRow(tr("Scale"), scale_mode_);
   form->addRow(tr("Minimum"), scale_lo_);
@@ -394,6 +404,7 @@ void MainWindow::BuildDisplayDock() {
   }
   connect(log_scale_, &QCheckBox::toggled, this, redraw);
   connect(threshold_mode_, &QCheckBox::toggled, this, redraw);
+  connect(background_subtract_, &QCheckBox::toggled, this, redraw);
   connect(threshold_, &QDoubleSpinBox::valueChanged, this, redraw);
   auto flip = [this] {
     view_->SetFlip(flip_h_->isChecked(), flip_v_->isChecked());
@@ -604,8 +615,7 @@ void MainWindow::ConnectTo(const ServerAddress& address) {
   subscriber_ = std::make_unique<FrameSubscriber>(
       &context_, data_ep,
       [this](Frame frame) {
-        stream_recorder_.Submit(frame);
-        processor_.Process(std::move(frame));
+        stream_recorder_.Submit(processor_.Process(std::move(frame)));
       },
       [self](const Json& status) {
         QMetaObject::invokeMethod(
@@ -614,7 +624,8 @@ void MainWindow::ConnectTo(const ServerAddress& address) {
               if (self) self->OnStatus(status);
             },
             Qt::QueuedConnection);
-      }, address.buffer_frames, control_ep);
+      },
+      address.buffer_frames, control_ep);
   subscriber_->Start();
   last_status_time_ = UnixTimeNow();
   ReloadSettings();
@@ -877,6 +888,17 @@ void MainWindow::RenderLatest() {
                                   latest->frame.header.seq)
       : latest->frame;
   if (!display.data) return;
+  const Json background = MeasureBackground(display, analysis_panel_->Rois());
+  display.analysis["background"] = background;
+  const bool valid_background = background.value("valid", false);
+  background_value_->setText(
+      valid_background ? tr("%1 (%2 pixels)")
+                             .arg(background["mean"].get<double>(), 0, 'g', 8)
+                             .arg(background["count"].get<long long>())
+                       : tr("Select an enabled BG ROI"));
+  if (background_subtract_->isChecked() && valid_background) {
+    display = SubtractBackground(display, background["mean"].get<double>());
+  }
   displayed_frame_ = std::move(display);
   const FrameHeader& h = displayed_frame_.header;
   last_rendered_seq_ = latest->frame.header.seq;
@@ -937,6 +959,7 @@ void MainWindow::ReconfigureAnalysis() {
   trend_panel_->SetNames(processor_.Names());
   analysis_panel_->SetVariableNames(processor_.Names());
   view_->SetRois(rois, analysis_panel_->SelectedRoi());
+  last_rendered_seq_ = UINT64_MAX;
 }
 
 DisplayOrientation MainWindow::Orientation() const {
@@ -951,6 +974,9 @@ Json MainWindow::SaveMetadata() const {
   Json display = OrientationToJson(Orientation());
   display["threshold_enabled"] = threshold_mode_->isChecked();
   display["threshold"] = threshold_->value();
+  display["background_subtract_enabled"] = background_subtract_->isChecked();
+  display["background"] =
+      displayed_frame_.analysis.value("background", Json::object());
   return Json{{"settings", settings_},
               {"display", display},
               {"camera",
@@ -964,6 +990,11 @@ Json MainWindow::SaveMetadata() const {
 }
 
 void MainWindow::SaveFramesTo(std::vector<Frame> frames, const QString& path) {
+  const auto rois = analysis_panel_->Rois();
+  for (auto& frame : frames) {
+    if (!frame.analysis.contains("background"))
+      frame.analysis["background"] = MeasureBackground(frame, rois);
+  }
   ImageFormat format;
   if (!FormatFromPath(path.toStdString(), &format)) {
     QMessageBox::warning(this, tr("Save"),
@@ -1163,6 +1194,8 @@ void MainWindow::LoadPreferences() {
   log_scale_->setChecked(s.value("display/log", false).toBool());
   threshold_->setValue(s.value("display/threshold", 1000.0).toDouble());
   threshold_mode_->setChecked(s.value("display/threshold_enabled", false).toBool());
+  background_subtract_->setChecked(
+      s.value("display/background_subtract", false).toBool());
   flip_h_->setChecked(s.value("display/flip_h", false).toBool());
   flip_v_->setChecked(s.value("display/flip_v", false).toBool());
   rotation_->setCurrentIndex(std::clamp(s.value("display/rotation", 0).toInt(), 0, 3));
@@ -1208,6 +1241,7 @@ void MainWindow::SavePreferences() const {
   s.setValue("display/pct_hi", pct_hi_->value());
   s.setValue("display/log", log_scale_->isChecked());
   s.setValue("display/threshold_enabled", threshold_mode_->isChecked());
+  s.setValue("display/background_subtract", background_subtract_->isChecked());
   s.setValue("display/threshold", threshold_->value());
   s.setValue("display/flip_h", flip_h_->isChecked());
   s.setValue("display/flip_v", flip_v_->isChecked());

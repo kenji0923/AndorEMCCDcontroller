@@ -67,7 +67,7 @@ class LiveProcessor {
   void SetUdp(const UdpConfig& config);
 
   /** Called on the receiver thread for every frame. */
-  void Process(Frame frame);
+  Frame Process(Frame frame);
 
   /** Variable names: "<roi>_<stat>" for enabled ROIs, then formula names. */
   std::vector<std::string> Names() const;

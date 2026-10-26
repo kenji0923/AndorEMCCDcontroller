@@ -91,8 +91,10 @@ bool WritePage(TIFF* file, const Frame& f, const Json& accounting,
       !TIFFSetField(file, TIFFTAG_SOFTWARE, "AndorEMCCDcontroller stream") ||
       !TIFFSetField(file, TIFFTAG_ORIENTATION, orientation))
     return false;
-  Json description{
-      {"frame", h}, {"delivery", f.delivery}, {"recording", accounting}};
+  Json description{{"frame", h},
+                   {"delivery", f.delivery},
+                   {"recording", accounting},
+                   {"analysis", f.analysis}};
   if (!metadata.is_null()) description["metadata"] = metadata;
   const auto text = description.dump();
   if (!TIFFSetField(file, TIFFTAG_IMAGEDESCRIPTION, text.c_str())) return false;

@@ -81,6 +81,8 @@ struct Frame {
   FrameHeader header;
   std::shared_ptr<const std::vector<std::uint8_t>> data;
   Json delivery = Json::object();  ///< Stream loss report, including zero losses.
+  Json analysis =
+      Json::object();  ///< Client-side measurements; raw pixels unchanged.
 };
 
 /** Seconds since the Unix epoch. */

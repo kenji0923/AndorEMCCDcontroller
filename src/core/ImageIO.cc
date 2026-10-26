@@ -157,7 +157,21 @@ bool WriteFrames(const std::string& path, ImageFormat format,
     case ImageFormat::kFits:
       return WriteFits(path, frames, metadata, error);
     case ImageFormat::kNpy:
-      return WriteNpy(path, frames, error);
+      if (!WriteNpy(path, frames, error)) return false;
+      {
+        Json annotations = Json::array();
+        for (const auto& frame : frames)
+          annotations.push_back(
+              {{"frame", frame.header}, {"analysis", frame.analysis}});
+        std::ofstream sidecar(path + ".json");
+        sidecar << Json{{"metadata", metadata}, {"frames", annotations}}.dump(
+            2);
+        if (!sidecar) {
+          *error = "cannot write metadata: " + path + ".json";
+          return false;
+        }
+      }
+      return true;
     case ImageFormat::kPng16:
       if (frames.size() == 1) return WritePng16(path, frames[0], metadata, error);
       for (std::size_t i = 0; i < frames.size(); ++i) {
@@ -206,7 +220,7 @@ bool WriteTiff(const std::string& path, const std::vector<Frame>& frames,
       TIFFSetField(t, TIFFTAG_PAGENUMBER, static_cast<std::uint16_t>(page),
                    static_cast<std::uint16_t>(frames.size()));
     }
-    Json description{{"frame", h}};
+    Json description{{"frame", h}, {"analysis", f.analysis}};
     if (page == 0 && !metadata.is_null()) description["metadata"] = metadata;
     const std::string text = description.dump();
     TIFFSetField(t, TIFFTAG_IMAGEDESCRIPTION, text.c_str());
@@ -251,6 +265,7 @@ bool ReadTiff(const std::string& path, std::vector<Frame>* frames,
       try {
         const Json j = Json::parse(desc);
         if (j.contains("frame")) f.header = j["frame"].get<FrameHeader>();
+        f.analysis = j.value("analysis", Json::object());
       } catch (const std::exception&) {
       }
     }
@@ -343,7 +358,7 @@ bool WritePngFile(const std::string& path, int width, int height,
 bool WritePng16(const std::string& path, const Frame& frame,
                 const Json& metadata, std::string* error) {
   const FrameHeader& h = frame.header;
-  Json description{{"frame", h}};
+  Json description{{"frame", h}, {"analysis", frame.analysis}};
   if (!metadata.is_null()) description["metadata"] = metadata;
   const std::string text = description.dump();
 
@@ -442,8 +457,13 @@ bool WriteFits(const std::string& path, const std::vector<Frame>& frames,
                   "display flipped horizontally", &status);
   fits_update_key(fits, TLOGICAL, "DISPFLPV", &flip_v,
                   "display flipped vertically", &status);
-  if (!metadata.is_null()) {
-    const std::string json = metadata.dump();
+  {
+    Json tagged = metadata.is_object() ? metadata : Json::object();
+    tagged["frame_analysis"] = Json::array();
+    for (const auto& frame : frames)
+      tagged["frame_analysis"].push_back(
+          {{"seq", frame.header.seq}, {"analysis", frame.analysis}});
+    const std::string json = tagged.dump();
     // Long text goes to COMMENT cards (72 characters each).
     for (std::size_t i = 0; i < json.size(); i += 70) {
       fits_write_comment(fits, json.substr(i, 70).c_str(), &status);

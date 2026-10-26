@@ -62,12 +62,13 @@ void LiveProcessor::SetUdp(const UdpConfig& config) {
   udp_dirty_ = true;  // Resolved on the receiver thread at the next frame.
 }
 
-void LiveProcessor::Process(Frame frame) {
+Frame LiveProcessor::Process(Frame frame) {
   auto result = std::make_shared<FrameResult>();
   result->receive_time = UnixTimeNow();
-  result->frame = frame;  // Shares the payload.
 
   std::lock_guard<std::mutex> lock(mutex_);
+  frame.analysis["background"] = MeasureBackground(frame, rois_);
+  result->frame = frame;  // Shares the unmodified raw payload.
   std::vector<double> inputs;
   for (const auto& roi : rois_) {
     if (!roi.enabled) continue;
@@ -96,6 +97,7 @@ void LiveProcessor::Process(Frame frame) {
   }
 
   latest_ = std::move(result);
+  return frame;
 }
 
 void LiveProcessor::ResolveUdp() {

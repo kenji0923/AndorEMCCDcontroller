@@ -21,6 +21,7 @@ jobs:
           python-version: "3.10"
       - name: Validate and package Python client and labscript device
         run: |
+          python -m unittest discover -s deploy -p 'test_deploy_windows_release.py' -v
           python -m compileall -q python/andor_emccd python/labscript_devices/AndorEMCCDRemote
           python -m pip install build
           python -m build --wheel --outdir dist python
